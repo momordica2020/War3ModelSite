@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>魔兽争霸3 3D模型查看器</title>
+    <link rel="stylesheet" href="src/style.css">
+</head>
+<body data-theme="dark">
+    <div id="app">
+        <header class="header">
+            <h1>魔兽争霸3 3D模型查看器</h1>
+            <div class="header-info">
+                <span id="model-info">等待加载模型...</span>
+                <button id="theme-toggle-btn" class="theme-toggle-btn" title="切换皮肤">🌙</button>
+            </div>
+        </header>
+
+        <div class="main-container">
+            <aside class="sidebar sidebar-left">
+                <div class="panel">
+                    <h2>模型浏览</h2>
+                    <div class="model-tree-search">
+                        <input type="text" id="model-search" placeholder="搜索模型..." autocomplete="off">
+                    </div>
+                    <div id="model-tree" class="model-tree">
+                        <div class="tree-loading">加载模型列表...</div>
+                    </div>
+                </div>
+            </aside>
+
+            <main class="viewer-container">
+                <canvas id="canvas"></canvas>
+                <div id="orientation-indicator" class="orientation-indicator">
+                    <svg id="orientation-svg" width="100" height="100" viewBox="-50 -50 100 100">
+                        <circle cx="0" cy="0" r="45" fill="rgba(0,0,0,0.4)" stroke="rgba(233,69,96,0.6)" stroke-width="1.5"/>
+                        <circle cx="0" cy="0" r="30" fill="none" stroke="rgba(255,255,255,0.15)" stroke-width="1"/>
+                        <circle cx="0" cy="0" r="15" fill="none" stroke="rgba(255,255,255,0.15)" stroke-width="1"/>
+                        <line x1="-45" y1="0" x2="45" y2="0" stroke="rgba(255,255,255,0.2)" stroke-width="1"/>
+                        <line x1="0" y1="-45" x2="0" y2="45" stroke="rgba(255,255,255,0.2)" stroke-width="1"/>
+                        <g id="orientation-axes">
+                            <line x1="0" y1="0" x2="0" y2="-35" stroke="#e94560" stroke-width="2"/>
+                            <line x1="0" y1="0" x2="30" y2="0" stroke="#4CAF50" stroke-width="2"/>
+                            <line x1="0" y1="0" x2="-20" y2="15" stroke="#2196F3" stroke-width="2"/>
+                            <circle cx="0" cy="-35" r="3" fill="#e94560"/>
+                            <text x="0" y="-40" text-anchor="middle" fill="#e94560" font-size="9">Y</text>
+                            <circle cx="30" cy="0" r="3" fill="#4CAF50"/>
+                            <text x="38" y="3" fill="#4CAF50" font-size="9">X</text>
+                            <circle cx="-20" cy="15" r="3" fill="#2196F3"/>
+                            <text x="-28" y="22" fill="#2196F3" font-size="9">Z</text>
+                        </g>
+                    </svg>
+                    <div id="orientation-info" class="orientation-info">
+                        <div>缩放: <span id="zoom-value">500</span></div>
+                        <div>X: <span id="angle-x-value">0°</span></div>
+                        <div>Y: <span id="angle-y-value">17°</span></div>
+                    </div>
+                </div>
+                <div id="loading-overlay" class="loading-overlay hidden">
+                    <div class="loading-spinner"></div>
+                    <div class="loading-text">加载中...</div>
+                </div>
+            </main>
+
+            <aside class="sidebar sidebar-right">
+                <div class="panel">
+                    <h2>动作列表</h2>
+                    <div id="animation-list" class="animation-list">
+                        <div class="animation-empty">加载模型后显示动作</div>
+                    </div>
+                    <div class="animation-buttons">
+                        <button id="play-btn" class="btn">播放</button>
+                        <button id="pause-btn" class="btn">暂停</button>
+                        <button id="stop-btn" class="btn">停止</button>
+                    </div>
+                    <div class="animation-options">
+                        <label>
+                            <input type="checkbox" id="loop-checkbox" checked>
+                            循环播放
+                        </label>
+                    </div>
+                    <div class="speed-control">
+                        <label for="speed-slider">播放速度: <span id="speed-value">1.0x</span></label>
+                        <input type="range" id="speed-slider" min="0.05" max="3" step="0.05" value="1">
+                    </div>
+                </div>
+
+                <div class="panel">
+                    <h2>视角与显示</h2>
+                    <div class="camera-controls">
+                        <div class="camera-buttons-row">
+                            <button id="reset-camera-btn" class="btn">重置视角</button>
+                            <button id="auto-rotate-btn" class="btn">自动旋转</button>
+                        </div>
+                    </div>
+                    <div class="display-options">
+                        <label>
+                            <input type="checkbox" id="wireframe-checkbox">
+                            线框模式
+                        </label>
+                        <label>
+                            <input type="checkbox" id="ground-checkbox">
+                            显示底板
+                        </label>
+                        <div class="bg-color-control">
+                            <label for="bg-color-input">背景颜色:</label>
+                            <div class="bg-color-row">
+                                <input type="color" id="bg-color-input" value="#1a1a2e">
+                                <div class="bg-color-presets">
+                                    <button class="bg-preset" data-color="#1a1a2e" title="深夜蓝"></button>
+                                    <button class="bg-preset" data-color="#0a0a15" title="深黑"></button>
+                                    <button class="bg-preset" data-color="#2d1b4e" title="紫色"></button>
+                                    <button class="bg-preset" data-color="#3d2817" title="棕色"></button>
+                                    <button class="bg-preset" data-color="#0f2027" title="青蓝"></button>
+                                    <button class="bg-preset" data-color="#c8d0e0" title="浅蓝"></button>
+                                    <button class="bg-preset" data-color="#e8e4d8" title="米白"></button>
+                                    <button class="bg-preset" data-color="#2b4a2b" title="森绿"></button>
+                                </div>
+                            </div>
+                        </div>
+                        <label>
+                            队伍颜色:
+                            <select id="team-color-select">
+                                <option value="0">红色</option>
+                                <option value="1">蓝色</option>
+                                <option value="2">青色</option>
+                                <option value="3">紫色</option>
+                                <option value="4">黄色</option>
+                                <option value="5">橙色</option>
+                                <option value="6">绿色</option>
+                                <option value="7">粉色</option>
+                                <option value="8">灰色</option>
+                                <option value="9">浅蓝色</option>
+                                <option value="10">深绿色</option>
+                                <option value="11">棕色</option>
+                                <option value="12">海军蓝</option>
+                                <option value="13">绿松石色</option>
+                                <option value="14">紫罗兰色</option>
+                                <option value="15">小麦色</option>
+                            </select>
+                        </label>
+                    </div>
+                </div>
+            </aside>
+        </div>
+
+        <footer class="footer">
+            <p>使用 mdx-m3-viewer 库构建 | 魔兽争霸3模型查看器</p>
+        </footer>
+    </div>
+</body>
+</html>

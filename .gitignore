@@ -1,0 +1,37 @@
+# 依赖
+node_modules/
+
+# 构建产物
+dist/
+
+# Webpack 缓存
+.cache/
+
+# 编辑器/系统文件
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# 日志
+*.log
+npm-debug.log*
+
+# 临时文件
+*.tmp
+*.bak
+
+# War3Assets 只保留模型和贴图文件（mdx/blp），其他排除
+War3Assets/**
+!War3Assets/**/
+!War3Assets/**/*.mdx
+!War3Assets/**/*.MDX
+!War3Assets/**/*.blp
+!War3Assets/**/*.BLP
+
+# Models 目录保留（自定义模型）
+
+# GitHub Actions workflow（OAuth App 无 workflow 权限，需手动在网页创建）
+.github/workflows/
