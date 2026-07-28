@@ -169,17 +169,33 @@ class War3ModelViewerApp {
             return this.uploadedAssets.get(lowerPath);
         }
 
-        // 2. 如果是War3标准路径（包含目录分隔符），映射到 War3Assets/ 目录
-        if (normalizedPath.includes('/')) {
-            // 大小写不敏感匹配：Linux/GitHub Pages 区分大小写，需纠正
+        // 2. 判断是否为 War3 标准资源
+        const isWar3Path = normalizedPath.startsWith('ReplaceableTextures/') ||
+                          normalizedPath.startsWith('Units/') ||
+                          normalizedPath.startsWith('Abilities/') ||
+                          normalizedPath.startsWith('Doodads/') ||
+                          normalizedPath.startsWith('Environment/') ||
+                          normalizedPath.startsWith('UI/') ||
+                          normalizedPath.startsWith('SharedModels/') ||
+                          normalizedPath.startsWith('Textures/');
+
+        // 如果当前模型是 War3 模型，或者路径看起来像 War3 标准路径
+        const modelDirIsWar3 = this.currentModelDir && this.currentModelDir.startsWith('War3Assets/');
+
+        if ((isWar3Path || modelDirIsWar3) && normalizedPath.includes('/')) {
+            // War3 标准路径：映射到 War3Assets/ 目录
             return this.war3AssetsPath + this.resolveCaseInsensitive(normalizedPath);
         }
 
-        // 3. 简单文件名（如 miku1.blp）：尝试在当前模型所在目录查找
+        // 3. 自定义模型的路径：相对于当前模型目录解析
         if (this.currentModelDir) {
-            const candidate = this.currentModelDir + '/' + normalizedPath;
-            // 不需要查实际文件，让浏览器去请求
-            return candidate;
+            // 如果路径包含 /，说明是相对路径，需要规范化
+            if (normalizedPath.includes('/')) {
+                // 提取文件名部分，忽略目录部分（因为自定义模型贴图通常在同目录）
+                const fileName = normalizedPath.split('/').pop();
+                return this.currentModelDir + '/' + fileName;
+            }
+            return this.currentModelDir + '/' + normalizedPath;
         }
 
         // 4. 无目录信息，返回原路径由调用方处理
@@ -621,6 +637,8 @@ class War3ModelViewerApp {
             const lastSlashIdx = modelPath.lastIndexOf('/');
             this.currentModelDir = lastSlashIdx >= 0 ? modelPath.substring(0, lastSlashIdx) : '';
 
+            const isWar3Model = modelPath.startsWith('War3Assets/');
+
             const pathSolver = (path) => {
                 if (path === modelPath) {
                     return path;
@@ -643,16 +661,22 @@ class War3ModelViewerApp {
                     return this.uploadedAssets.get(fileName.toLowerCase());
                 }
 
-                // 2. 如果是War3标准路径（带目录），映射到War3Assets
-                if (normalizedPath.includes('/')) {
-                    // 修正大小写：Linux/GitHub Pages 区分大小写
-                    // MDX 内部常引用小写目录名，实际目录是大写开头
+                // 2. War3 标准模型：带目录的路径映射到 War3Assets
+                if (isWar3Model && normalizedPath.includes('/')) {
                     return this.war3AssetsPath + this.fixCommonCaseIssues(normalizedPath);
                 }
 
-                // 3. 简单文件名：先试模型同目录
+                // 3. 自定义模型或简单文件名：相对于模型目录解析
                 const lastSlash = modelPath.lastIndexOf('/');
                 const baseDir = lastSlash >= 0 ? modelPath.substring(0, lastSlash + 1) : '';
+
+                if (isWar3Model) {
+                    // War3 模型的简单文件名也映射到 War3Assets
+                    return this.war3AssetsPath + this.fixCommonCaseIssues(normalizedPath);
+                }
+
+                // 自定义模型：如果路径包含 ./ 或 ../，需要规范化
+                // 但通常贴图是简单文件名，直接拼接 baseDir
                 return baseDir + path;
             };
 
