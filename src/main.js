@@ -156,8 +156,13 @@ class War3ModelViewerApp {
     }
 
     // ===== 资源路径解析 =====
-    resolveAssetPath(path) {
-        const normalizedPath = path.replace(/\\/g, '/');
+    // 缓存：路径大小写映射（避免反复扫描目录）
+    // key: 小写相对路径, value: 实际路径（含正确大小写）
+    _pathCaseCache = new Map();
+    _pathCaseCacheDir = null; // 当前缓存的基础目录
+
+    resolveAssetPath(assetPath) {
+        const normalizedPath = assetPath.replace(/\\/g, '/');
 
         // 1. 先查找用户上传的资源
         if (this.uploadedAssets.has(normalizedPath)) {
@@ -170,11 +175,70 @@ class War3ModelViewerApp {
 
         // 2. 如果是War3标准路径（包含目录分隔符），映射到 War3Assets/ 目录
         if (normalizedPath.includes('/')) {
-            return this.war3AssetsPath + normalizedPath;
+            // 大小写不敏感匹配：Linux/GitHub Pages 区分大小写，需纠正
+            return this.war3AssetsPath + this.resolveCaseInsensitive(normalizedPath);
         }
 
-        // 3. 简单文件名：返回原路径由调用方处理
-        return path;
+        // 3. 简单文件名（如 miku1.blp）：尝试在当前模型所在目录查找
+        if (this.currentModelDir) {
+            const candidate = this.currentModelDir + '/' + normalizedPath;
+            // 不需要查实际文件，让浏览器去请求
+            return candidate;
+        }
+
+        // 4. 无目录信息，返回原路径由调用方处理
+        return assetPath;
+    }
+
+    // 大小写不敏感路径解析：在 War3Assets 中查找实际路径
+    // 例如引用 "units/Creeps/X/Y.blp" 实际为 "Units/Creeps/X/Y.blp"
+    resolveCaseInsensitive(refPath) {
+        const lower = refPath.toLowerCase();
+        // 检查缓存
+        if (this._pathCaseCache.has(lower)) {
+            return this._pathCaseCache.get(lower);
+        }
+
+        // 直接构造路径检查（快速路径：大小写正好匹配）
+        // 此处无法访问 fs，所以用 try-catch + 同步 XHR 不可行
+        // 改为：对常见目录做大小写修正
+        const fixed = this.fixCommonCaseIssues(refPath);
+        this._pathCaseCache.set(lower, fixed);
+        return fixed;
+    }
+
+    // 修正 War3 资源路径中常见的大小写问题
+    // Linux/GitHub Pages 区分大小写，但 MDX 内部引用的目录名常与实际不符
+    // 此映射表通过扫描所有 mdx 文件统计得出（共 15 个目录需修正）
+    static CASE_FIX_MAP = {
+        'abilities': 'Abilities',
+        'altarofelders': 'AltarOfElders',
+        'altarofstorms': 'AltarOfStorms',
+        'ancientoflore': 'AncientOfLore',
+        'ancientofwar': 'AncientOfWar',
+        'ancientofwind': 'AncientOfWind',
+        'doodads': 'Doodads',
+        'environment': 'Environment',
+        'gyrocopter': 'GyroCopter',
+        'minimap': 'MiniMap',
+        'objects': 'Objects',
+        'treasurechest': 'TreasureChest',
+        'treeoflife': 'TreeOfLife',
+        'ui': 'UI',
+        'units': 'Units',
+    };
+
+    fixCommonCaseIssues(refPath) {
+        const sep = '/';
+        const parts = refPath.split(sep);
+        // 只修正目录部分（最后一段是文件名，不修正）
+        for (let i = 0; i < parts.length - 1; i++) {
+            const lower = parts[i].toLowerCase();
+            if (this.constructor.CASE_FIX_MAP[lower]) {
+                parts[i] = this.constructor.CASE_FIX_MAP[lower];
+            }
+        }
+        return parts.join(sep);
     }
 
     // ===== 事件监听 =====
@@ -487,6 +551,10 @@ class War3ModelViewerApp {
         this.modelSource = modelPath;
 
         try {
+            // 记录当前模型所在目录（用于解析简单文件名贴图，如 miku1.blp）
+            const lastSlashIdx = modelPath.lastIndexOf('/');
+            this.currentModelDir = lastSlashIdx >= 0 ? modelPath.substring(0, lastSlashIdx) : '';
+
             const pathSolver = (path) => {
                 if (path === modelPath) {
                     return path;
@@ -511,7 +579,9 @@ class War3ModelViewerApp {
 
                 // 2. 如果是War3标准路径（带目录），映射到War3Assets
                 if (normalizedPath.includes('/')) {
-                    return this.war3AssetsPath + normalizedPath;
+                    // 修正大小写：Linux/GitHub Pages 区分大小写
+                    // MDX 内部常引用小写目录名，实际目录是大写开头
+                    return this.war3AssetsPath + this.fixCommonCaseIssues(normalizedPath);
                 }
 
                 // 3. 简单文件名：先试模型同目录

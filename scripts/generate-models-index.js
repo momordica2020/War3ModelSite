@@ -189,11 +189,26 @@ if (customModels.length > 0) {
 }
 
 const output = {
-    generatedAt: new Date().toISOString(),
     totalModels: totalCount,
     tree: tree,
 };
 
-fs.writeFileSync(OUTPUT, JSON.stringify(output, null, 2), 'utf-8');
-console.log(`完成！共索引 ${totalCount} 个模型`);
+const newContent = JSON.stringify(output, null, 2) + '\n';
+
+let shouldWrite = true;
+if (fs.existsSync(OUTPUT)) {
+    const oldContent = fs.readFileSync(OUTPUT, 'utf-8');
+    const oldData = JSON.parse(oldContent);
+    if (oldData.totalModels === output.totalModels &&
+        JSON.stringify(oldData.tree) === JSON.stringify(output.tree)) {
+        shouldWrite = false;
+    }
+}
+
+if (shouldWrite) {
+    fs.writeFileSync(OUTPUT, newContent, 'utf-8');
+    console.log(`完成！共索引 ${totalCount} 个模型（已更新）`);
+} else {
+    console.log(`完成！共索引 ${totalCount} 个模型（无变化，未更新文件）`);
+}
 console.log(`输出文件: ${OUTPUT}`);
