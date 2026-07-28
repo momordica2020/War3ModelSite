@@ -120,6 +120,9 @@ class War3ModelViewerApp {
         // 线框模式状态
         this.wireframeBuffers = null;
 
+        // 模型加载令牌：防止快速切换时旧模型加载完覆盖新模型
+        this._loadToken = 0;
+
         // 模型源数据（用于解析面数据）
         this.modelSource = null;
         this.modelParser = null;
@@ -606,7 +609,7 @@ class War3ModelViewerApp {
         const rightHandle = document.getElementById('sidebar-right-handle');
         const isMobile = () => window.innerWidth <= 768;
 
-        // 左侧栏开关
+        // ===== 左侧栏：滑出式抽屉 =====
         if (modelsBtn) {
             modelsBtn.addEventListener('click', () => {
                 if (!isMobile()) return;
@@ -615,19 +618,10 @@ class War3ModelViewerApp {
             });
         }
 
-        // 点击遮罩关闭左侧栏
         if (overlay) {
             overlay.addEventListener('click', () => {
                 sidebarLeft.classList.remove('mobile-open');
                 overlay.classList.remove('visible');
-            });
-        }
-
-        // 右侧栏手柄点击切换
-        if (rightHandle) {
-            rightHandle.addEventListener('click', () => {
-                if (!isMobile()) return;
-                sidebarRight.classList.toggle('mobile-open');
             });
         }
 
@@ -642,6 +636,183 @@ class War3ModelViewerApp {
                 }
             });
         });
+
+        // ===== 右侧栏：底部三段式抽屉 =====
+        // 状态: collapsed(只显手柄) -> half(显示动作列表, 默认) -> full(全部展开)
+        let drawerState = 'half'; // collapsed | half | full
+
+        const setDrawerState = (state) => {
+            drawerState = state;
+            sidebarRight.classList.remove('mobile-collapsed', 'mobile-half', 'mobile-full');
+            sidebarRight.classList.add('mobile-' + state);
+
+            // 更新方向指示器位置，避免被底部抽屉遮挡
+            const indicator = document.getElementById('orientation-indicator');
+            if (indicator && isMobile()) {
+                const isSmall = window.innerWidth <= 480;
+                const halfRatio = isSmall ? 0.45 : 0.40;
+                const fullRatio = isSmall ? 0.85 : 0.80;
+                let bottomPx;
+                if (state === 'collapsed') {
+                    bottomPx = 52;
+                } else if (state === 'half') {
+                    bottomPx = window.innerHeight * halfRatio + 8;
+                } else {
+                    bottomPx = window.innerHeight * fullRatio + 8;
+                }
+                indicator.style.bottom = bottomPx + 'px';
+            }
+        };
+
+        // 初始状态：移动端默认半开
+        if (isMobile()) {
+            setDrawerState('half');
+        }
+
+        window.addEventListener('resize', () => {
+            if (isMobile() && !sidebarRight.classList.contains('mobile-half') &&
+                !sidebarRight.classList.contains('mobile-full') &&
+                !sidebarRight.classList.contains('mobile-collapsed')) {
+                setDrawerState('half');
+            }
+        });
+
+        // 手柄点击/拖拽：三段式状态切换
+        if (rightHandle) {
+            let startY = 0;
+            let startState = null;
+            let isDragging = false;
+            let startVelocity = 0;
+            let lastY = 0;
+            let lastTime = 0;
+            let movedDistance = 0;
+            let suppressClick = false;
+
+            const getDrawerHeight = () => {
+                const rect = sidebarRight.getBoundingClientRect();
+                return rect.height;
+            };
+
+            const getVisibleHeight = () => {
+                const rect = sidebarRight.getBoundingClientRect();
+                return window.innerHeight - rect.top;
+            };
+
+            // 点击切换：collapsed -> half -> full -> half
+            rightHandle.addEventListener('click', (e) => {
+                if (!isMobile()) return;
+                if (suppressClick) {
+                    suppressClick = false;
+                    return;
+                }
+                if (drawerState === 'collapsed') {
+                    setDrawerState('half');
+                } else if (drawerState === 'half') {
+                    setDrawerState('full');
+                } else {
+                    setDrawerState('half');
+                }
+            });
+
+            rightHandle.addEventListener('touchstart', (e) => {
+                if (!isMobile()) return;
+                isDragging = true;
+                startY = e.touches[0].clientY;
+                startState = drawerState;
+                lastY = startY;
+                lastTime = Date.now();
+                movedDistance = 0;
+                startVelocity = 0;
+                sidebarRight.style.transition = 'none';
+            }, { passive: true });
+
+            rightHandle.addEventListener('touchmove', (e) => {
+                if (!isDragging || !isMobile()) return;
+                const dy = e.touches[0].clientY - startY;
+                movedDistance = Math.abs(dy);
+                const h = getDrawerHeight();
+                const isSmall = window.innerWidth <= 480;
+                const halfRatio = isSmall ? 0.45 : 0.40;
+                const halfPx = window.innerHeight * halfRatio;
+
+                let visiblePx;
+                if (startState === 'collapsed') {
+                    visiblePx = 44 - dy;
+                } else if (startState === 'half') {
+                    visiblePx = halfPx - dy;
+                } else {
+                    visiblePx = h - dy;
+                }
+
+                visiblePx = Math.max(44, Math.min(h, visiblePx));
+                const translateY = h - visiblePx;
+                sidebarRight.style.transform = 'translateY(' + translateY + 'px)';
+
+                // 拖拽时同步更新方向指示器位置
+                const indicator = document.getElementById('orientation-indicator');
+                if (indicator) {
+                    indicator.style.bottom = (visiblePx + 8) + 'px';
+                }
+
+                const now = Date.now();
+                const dt = now - lastTime;
+                if (dt > 0) {
+                    startVelocity = (e.touches[0].clientY - lastY) / dt;
+                }
+                lastY = e.touches[0].clientY;
+                lastTime = now;
+            }, { passive: true });
+
+            rightHandle.addEventListener('touchend', (e) => {
+                if (!isDragging || !isMobile()) return;
+                isDragging = false;
+                sidebarRight.style.transition = '';
+                sidebarRight.style.transform = '';
+
+                // 移动距离小，视为点击（让 click 事件处理）
+                if (movedDistance < 8) {
+                    suppressClick = false;
+                    return;
+                }
+
+                // 移动距离大，阻止后续 click 事件
+                suppressClick = true;
+
+                const h = getDrawerHeight();
+                const visiblePx = getVisibleHeight();
+                const isSmall = window.innerWidth <= 480;
+                const halfRatio = isSmall ? 0.45 : 0.40;
+                const halfPx = window.innerHeight * halfRatio;
+
+                // 快速滑动
+                const fastSwipe = Math.abs(startVelocity) > 0.3;
+                if (fastSwipe) {
+                    if (startVelocity > 0) {
+                        if (drawerState === 'full') setDrawerState('half');
+                        else if (drawerState === 'half') setDrawerState('collapsed');
+                        else setDrawerState('collapsed');
+                    } else {
+                        if (drawerState === 'collapsed') setDrawerState('half');
+                        else if (drawerState === 'half') setDrawerState('full');
+                        else setDrawerState('full');
+                    }
+                    return;
+                }
+
+                // 就近吸附
+                const distToCollapsed = Math.abs(visiblePx - 44);
+                const distToHalf = Math.abs(visiblePx - halfPx);
+                const distToFull = Math.abs(visiblePx - h);
+
+                if (distToCollapsed < distToHalf && distToCollapsed < distToFull) {
+                    setDrawerState('collapsed');
+                } else if (distToHalf < distToCollapsed && distToHalf < distToFull) {
+                    setDrawerState('half');
+                } else {
+                    setDrawerState('full');
+                }
+            });
+        }
     }
 
     ensureNeutralTeamColor() {
@@ -960,26 +1131,38 @@ class War3ModelViewerApp {
 
     // ===== 模型加载 =====
     async loadModel(modelPath, modelName) {
+        // 递增加载令牌，旧的加载请求完成后会被丢弃
+        const myToken = ++this._loadToken;
+
         this.showLoading(true);
         document.getElementById('model-info').textContent = '正在加载: ' + modelName;
-        console.log('[ModelLoader] 开始加载模型:', modelPath);
+        console.log('[ModelLoader] 开始加载模型:', modelPath, 'token=' + myToken);
+
+        // 立即移除当前实例（避免画面上残留旧模型）
+        if (this.currentInstance) {
+            this.scene.removeInstance(this.currentInstance);
+            this.currentInstance = null;
+            this.currentModel = null;
+        }
 
         // 预检：测试模型文件是否可访问
         try {
             const probeResp = await fetch(modelPath, { method: 'HEAD' });
+            // 令牌已过期（用户又点了别的模型），直接放弃
+            if (myToken !== this._loadToken) {
+                console.log('[ModelLoader] 令牌已过期，放弃加载:', modelPath);
+                return;
+            }
             console.log('[ModelLoader] 预检 HEAD ' + modelPath + ' -> ' + probeResp.status + ' ' + probeResp.statusText);
             if (!probeResp.ok) {
                 throw new Error('模型文件不可访问 (HTTP ' + probeResp.status + '): ' + modelPath);
             }
         } catch (probeErr) {
+            if (myToken !== this._loadToken) return;
             console.error('[ModelLoader] 预检失败:', probeErr);
-            throw new Error('无法访问模型文件: ' + (probeErr.message || probeErr));
-        }
-
-        if (this.currentInstance) {
-            this.scene.removeInstance(this.currentInstance);
-            this.currentInstance = null;
-            this.currentModel = null;
+            this.showLoading(false);
+            this.showError('无法加载模型', modelPath, '预检失败: ' + (probeErr.message || probeErr));
+            return;
         }
 
         // 重置线框状态
@@ -1111,6 +1294,12 @@ class War3ModelViewerApp {
 
             console.log('[ModelLoader] 调用 viewer.load, pathSolver 已就绪');
             const model = await this.viewer.load(modelPath, pathSolver);
+
+            // 令牌检查：如果用户已经切换到别的模型，直接丢弃
+            if (myToken !== this._loadToken) {
+                console.log('[ModelLoader] 令牌已过期，丢弃已加载模型:', modelPath);
+                return;
+            }
             console.log('[ModelLoader] viewer.load 返回:', model ? '成功' : 'null/undefined');
 
             if (!model) {
@@ -1121,6 +1310,12 @@ class War3ModelViewerApp {
 
             // 解析模型文件以获取面数据
             await this.parseModelData(modelPath);
+
+            // 再次检查令牌
+            if (myToken !== this._loadToken) {
+                console.log('[ModelLoader] 令牌已过期 (parseModelData 后)，丢弃模型:', modelPath);
+                return;
+            }
 
             const instance = model.addInstance();
             instance.setScene(this.scene);
@@ -1157,22 +1352,16 @@ class War3ModelViewerApp {
             }
 
         } catch (error) {
+            if (myToken !== this._loadToken) {
+                console.log('[ModelLoader] 加载出错但令牌已过期，忽略错误:', modelPath);
+                return;
+            }
             console.error('加载模型失败:', error);
             const errMsg = error && error.message ? error.message : String(error);
             document.getElementById('model-info').textContent = '加载失败: ' + errMsg;
-            const gl = this.viewer && this.viewer.gl;
-            const isWebGL2 = gl && typeof gl.drawArraysInstanced === 'function';
-            const details = [
-                '错误: ' + errMsg,
-                '模型路径: ' + modelPath,
-                'WebGL版本: ' + (isWebGL2 ? '2.0' : '1.0'),
-            ].join('\n');
-            console.error('详细错误信息:\n' + details);
-            if (!isWebGL2) {
-                alert('加载模型失败:\n您的浏览器仅支持 WebGL 1.0 且缺少必要扩展\n\n请更新浏览器到最新版本');
-            } else {
-                alert('加载模型失败:\n' + errMsg + '\n\n详细信息请打开调试面板 (右下角🐛按钮)');
-            }
+            this.showLoading(false);
+            this.showError('无法加载模型', modelPath, errMsg);
+            return;
         }
 
         this.showLoading(false);
@@ -1491,8 +1680,18 @@ class War3ModelViewerApp {
             return;
         }
 
+        // 递增加载令牌
+        const myToken = ++this._loadToken;
+
         this.showLoading(true);
         document.getElementById('model-info').textContent = '正在加载: ' + mdxFile.name;
+
+        // 立即移除当前实例
+        if (this.currentInstance) {
+            this.scene.removeInstance(this.currentInstance);
+            this.currentInstance = null;
+            this.currentModel = null;
+        }
 
         // 重置状态
         this.wireframeBuffers = null;
@@ -1549,18 +1748,16 @@ class War3ModelViewerApp {
         this.modelSource = mdxFile;
 
         this.viewer.load(blobUrls.get(mdxFile.name), pathSolver).then(async (model) => {
+            if (myToken !== this._loadToken) return;
             if (!model) {
                 throw new Error('无法加载模型文件');
-            }
-
-            if (this.currentInstance) {
-                this.scene.removeInstance(this.currentInstance);
             }
 
             this.currentModel = model;
 
             // 解析模型数据
             await this.parseModelData(mdxFile);
+            if (myToken !== this._loadToken) return;
 
             const instance = model.addInstance();
             instance.setScene(this.scene);
@@ -1593,9 +1790,11 @@ class War3ModelViewerApp {
 
             this.showLoading(false);
         }).catch((error) => {
+            if (myToken !== this._loadToken) return;
             console.error('加载模型失败:', error);
             document.getElementById('model-info').textContent = '加载失败: ' + error.message;
-            alert('加载模型失败: ' + error.message);
+            this.showLoading(false);
+            this.showError('无法加载模型', mdxFile.name, error.message);
             this.showLoading(false);
         });
     }

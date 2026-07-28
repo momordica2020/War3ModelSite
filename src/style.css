@@ -924,26 +924,7 @@ body[data-theme="light"] .tree-group-count {
 
 /* 调试开关按钮 */
 .debug-toggle-btn {
-    position: fixed;
-    bottom: 10px;
-    right: 10px;
-    z-index: 9998;
-    width: 40px;
-    height: 40px;
-    background: rgba(233, 69, 96, 0.8);
-    border: none;
-    border-radius: 50%;
-    color: #fff;
-    font-size: 18px;
-    cursor: pointer;
-    display: none;
-    align-items: center;
-    justify-content: center;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-}
-
-.debug-toggle-btn.visible {
-    display: flex;
+    display: none !important;
 }
 
 /* ===== 移动端导航按钮（默认隐藏，移动端显示） ===== */
@@ -1027,22 +1008,89 @@ body[data-theme="light"] .tree-group-count {
         overflow: hidden;
     }
 
-    /* 左侧栏：滑出式抽屉 */
+    /* 左侧栏：滑出式抽屉 — 扁平化，无圆角无多余内边距 */
     .sidebar-left {
         position: fixed;
         top: 0;
         left: 0;
         bottom: 0;
-        width: 80vw !important;
-        max-width: 320px;
+        width: 82vw !important;
+        max-width: 340px;
         z-index: 999;
         transform: translateX(-100%);
-        transition: transform 0.3s ease;
-        padding-top: env(safe-area-inset-top, 0);
+        transition: transform 0.25s ease;
+        padding: env(safe-area-inset-top, 0) 0 env(safe-area-inset-bottom, 0) 0;
+        border-right: 1px solid var(--border-accent);
+        border-radius: 0;
     }
 
     .sidebar-left.mobile-open {
         transform: translateX(0);
+    }
+
+    /* 左侧栏内的面板：去边框去圆角，更紧凑 */
+    .sidebar-left .panel {
+        border-radius: 0;
+        border-left: none;
+        border-right: none;
+        border-top: none;
+        padding: 8px 10px;
+        margin-bottom: 0;
+        border-bottom: 1px solid var(--border-accent);
+    }
+
+    .sidebar-left .panel h2 {
+        font-size: 13px;
+        margin-bottom: 6px;
+        padding-bottom: 4px;
+    }
+
+    /* 模型树：更紧凑 */
+    .sidebar-left .model-tree {
+        max-height: none;
+    }
+
+    .sidebar-left .tree-category {
+        margin-bottom: 2px;
+    }
+
+    .sidebar-left .tree-category-header {
+        padding: 6px 8px;
+        font-size: 13px;
+        border-radius: 0;
+        min-height: 36px;
+    }
+
+    .sidebar-left .tree-category-content {
+        padding-left: 8px;
+    }
+
+    .sidebar-left .tree-subcategory-header {
+        padding: 5px 8px;
+        font-size: 12px;
+        min-height: 32px;
+    }
+
+    .sidebar-left .tree-subcategory-content {
+        padding-left: 6px;
+    }
+
+    .sidebar-left .tree-group-header {
+        padding: 4px 8px;
+        font-size: 11px;
+        min-height: 28px;
+    }
+
+    .sidebar-left .tree-model-item {
+        padding: 5px 10px;
+        font-size: 12px;
+        min-height: 34px;
+    }
+
+    /* 上传按钮：更紧凑 */
+    .sidebar-left .upload-btn {
+        padding: 8px;
+        font-size: 12px;
     }
 
     /* 中央画布：全屏 */
@@ -1052,25 +1100,79 @@ body[data-theme="light"] .tree-group-count {
         width: 100%;
     }
 
-    /* 右侧栏：底部上滑面板 */
+    /* 右侧栏：底部上滑抽屉 — 整体内容一股脑滚动 */
     .sidebar-right {
         position: fixed;
         left: 0;
         right: 0;
         bottom: 0;
         width: 100% !important;
-        max-height: 70vh;
+        max-height: 80vh;
+        height: 80vh;
         z-index: 999;
-        transform: translateY(calc(100% - 48px));
-        transition: transform 0.3s ease;
-        border-radius: 16px 16px 0 0;
-        border-top: 2px solid var(--accent);
-        box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.4);
+        transform: translateY(calc(100% - 40vh));
+        transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        border-radius: 14px 14px 0 0;
+        border-top: 1px solid var(--border-accent);
+        box-shadow: 0 -2px 16px rgba(0, 0, 0, 0.35);
         padding-bottom: env(safe-area-inset-bottom, 0);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
     }
 
-    .sidebar-right.mobile-open {
+    .sidebar-right.mobile-collapsed {
+        transform: translateY(calc(100% - 44px));
+    }
+
+    .sidebar-right.mobile-half {
+        transform: translateY(calc(100% - 40vh));
+    }
+
+    .sidebar-right.mobile-full {
         transform: translateY(0);
+    }
+
+    /* 底部抽屉内容：整体滚动，不分多个独立面板 */
+    .sidebar-right .mobile-scroll-area {
+        flex: 1;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        padding: 0 12px 16px;
+    }
+
+    /* 动表面板（第一个）：无独立滚动，融入整体 */
+    .sidebar-right > .panel:first-of-type {
+        flex-shrink: 0;
+        padding: 10px 12px 8px;
+        margin-bottom: 0;
+        border-bottom: 1px solid var(--border-accent);
+    }
+
+    /* 统一右侧栏内面板样式：更紧凑 */
+    .sidebar-right .panel {
+        border-radius: 0;
+        border-left: none;
+        border-right: none;
+        border-top: none;
+        border-bottom: 1px solid var(--border-accent);
+        padding: 10px 0;
+        margin-bottom: 0;
+    }
+
+    .sidebar-right .panel:last-child {
+        border-bottom: none;
+    }
+
+    .sidebar-right .panel h2 {
+        font-size: 13px;
+        margin-bottom: 8px;
+        padding-bottom: 4px;
+    }
+
+    /* 动作列表：不设固定高度，跟随整体滚动 */
+    .sidebar-right .animation-list {
+        max-height: none;
     }
 
     /* 拖拽手柄 */
@@ -1079,10 +1181,11 @@ body[data-theme="light"] .tree-group-count {
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        padding: 8px 0 4px;
+        padding: 6px 0 2px;
         cursor: grab;
         user-select: none;
         -webkit-user-select: none;
+        flex-shrink: 0;
     }
 
     .sidebar-right-handle:active {
@@ -1090,82 +1193,78 @@ body[data-theme="light"] .tree-group-count {
     }
 
     .handle-bar {
-        width: 40px;
-        height: 4px;
+        width: 36px;
+        height: 3px;
         background: var(--text-dim);
         border-radius: 2px;
-        margin-bottom: 4px;
+        margin-bottom: 3px;
     }
 
     .handle-text {
-        font-size: 12px;
+        font-size: 11px;
         color: var(--text-muted);
     }
 
-    .panel {
-        padding: 10px;
-        margin-bottom: 8px;
-    }
-
-    .panel h2 {
-        font-size: 14px;
-    }
-
-    .model-tree {
-        max-height: calc(100vh - 200px);
-    }
-
-    .animation-list {
-        max-height: 30vh;
+    .btn {
+        padding: 9px 6px;
+        font-size: 12px;
+        min-height: 38px;
     }
 
     .animation-buttons {
         flex-wrap: wrap;
+        gap: 6px;
     }
 
     .animation-buttons .btn {
-        flex: 1 1 auto;
-        min-width: 30%;
+        flex: 1 1 28%;
+        min-width: 0;
     }
 
     .camera-buttons-row {
         flex-wrap: wrap;
+        gap: 6px;
     }
 
     .camera-buttons-row .btn {
         flex: 1 1 45%;
     }
 
-    .btn {
-        padding: 10px 8px;
-        font-size: 12px;
+    /* 方向指示器：移到底部抽屉上方，避免被遮挡 */
+    .orientation-indicator {
+        bottom: calc(40vh + 8px);
+        right: 6px;
+        transform: scale(0.55);
+        transform-origin: bottom right;
+        z-index: 20;
     }
 
-    .orientation-indicator {
-        bottom: 55px;
-        right: 8px;
-        transform: scale(0.65);
-        transform-origin: bottom right;
+    .sidebar-right.mobile-full ~ .viewer-container .orientation-indicator {
+        bottom: calc(80vh + 8px);
+    }
+
+    .sidebar-right.mobile-collapsed ~ .viewer-container .orientation-indicator {
+        bottom: 52px;
     }
 
     .bg-color-presets {
         flex-wrap: wrap;
+        gap: 6px;
+    }
+
+    .bg-preset {
+        width: 26px;
+        height: 26px;
     }
 
     .footer {
         display: none;
     }
 
-    /* 触屏优化：增大按钮点击区域 */
+    /* 触屏优化：按钮最小高度 */
     .btn,
-    .tree-category-header,
-    .tree-subcategory-header,
-    .tree-group-header,
-    .tree-model-item,
-    .animation-item,
-    .model-item {
-        min-height: 40px;
-        padding: 10px 12px;
+    .animation-item {
+        min-height: 38px;
     }
 
     /* 移动端画布触控优化 */
@@ -1176,16 +1275,31 @@ body[data-theme="light"] .tree-group-count {
 
 @media (max-width: 480px) {
     .header h1 {
-        font-size: 14px;
+        font-size: 13px;
     }
 
     .bg-preset {
-        width: 24px;
-        height: 24px;
+        width: 22px;
+        height: 22px;
     }
 
     .orientation-indicator {
-        transform: scale(0.55);
+        transform: scale(0.5);
+    }
+
+    .btn {
+        padding: 8px 4px;
+        font-size: 11px;
+        min-height: 36px;
+    }
+
+    .sidebar-right {
+        max-height: 85vh;
+        height: 85vh;
+    }
+
+    .sidebar-right.mobile-half {
+        transform: translateY(calc(100% - 45vh));
     }
 }
 
