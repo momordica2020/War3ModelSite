@@ -24,10 +24,6 @@ class War3ModelViewerApp {
         // 线框模式状态
         this.wireframeBuffers = null;
 
-        // 底板状态
-        this.groundGeosetIndices = [];
-        this.hiddenGeosets = new Set();
-
         // 模型源数据（用于解析面数据）
         this.modelSource = null;
         this.modelParser = null;
@@ -325,10 +321,6 @@ class War3ModelViewerApp {
             this.setWireframe(e.target.checked);
         });
 
-        document.getElementById('ground-checkbox').addEventListener('change', (e) => {
-            this.setGroundVisible(e.target.checked);
-        });
-
         const bgColorInput = document.getElementById('bg-color-input');
         if (bgColorInput) {
             bgColorInput.addEventListener('input', (e) => {
@@ -348,11 +340,88 @@ class War3ModelViewerApp {
 
         document.getElementById('team-color-select').addEventListener('change', (e) => {
             if (this.currentInstance) {
-                this.currentInstance.setTeamColor(parseInt(e.target.value));
+                const color = parseInt(e.target.value);
+                this.applyTeamColor(color);
             }
         });
 
         window.addEventListener('resize', () => this.onResize());
+    }
+
+    ensureNeutralTeamColor() {
+        try {
+            const mdxCache = this.viewer.sharedCache.get('mdx');
+            if (!mdxCache) return false;
+            if (mdxCache.teamColors[24]) return true;
+
+            // mdx-m3-viewer 渲染管线：
+            //   1. batchgroup.js:
+            //        let teamColorTexture = textures[teamColorId];
+            //        if (teamColorTexture.replaceableId === 0 || === 1) {
+            //          teamColorTexture = teamColors[instance.teamColor];
+            //        }
+            //        const actualTeamColorTexture = ... || teamColorTexture.texture;
+            //        webgl.bindTextureAndWrap(actualTeamColorTexture, 4, ...);
+            //   2. bindTextureAndWrap 内部: gl.bindTexture(gl.TEXTURE_2D, texture.webglResource);
+            //   => 必须提供 wrapper.texture.webglResource 链，不能只设 wrapper.webglResource
+            //   => 若用 Object.create(reference)，必须覆盖 .texture，否则会继承 reference 的 .texture（导致显示成其他队伍色）
+            const gl = this.viewer.gl;
+
+            const createBlackWrapper = (reference, replaceableId) => {
+                const tex = gl.createTexture();
+                gl.bindTexture(gl.TEXTURE_2D, tex);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+                if (reference && reference.wrapS !== undefined) {
+                    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, reference.wrapS);
+                    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, reference.wrapT);
+                } else {
+                    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+                    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+                }
+                gl.texImage2D(
+                    gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0,
+                    gl.RGBA, gl.UNSIGNED_BYTE,
+                    new Uint8Array([0, 0, 0, 255])
+                );
+                // 构造一个最小可用的 inner texture 对象（模拟 BlpTexture 接口）
+                const innerTexture = {
+                    webglResource: tex,
+                    width: 1,
+                    height: 1
+                };
+                // 关键：用 Object.create 但覆盖 .texture，避免继承 reference 的 .texture
+                const wrapper = reference ? Object.create(reference) : {};
+                wrapper.texture = innerTexture;
+                wrapper.replaceableId = replaceableId;
+                return wrapper;
+            };
+
+            const colorWrapper = createBlackWrapper(mdxCache.teamColors[0], 0);
+            mdxCache.teamColors[24] = colorWrapper;
+
+            const glowWrapper = createBlackWrapper(mdxCache.teamGlows[0], 1);
+            mdxCache.teamGlows[24] = glowWrapper;
+
+            console.log('中立颜色纹理已在内存中创建 (纯黑色)');
+            return true;
+        } catch (e) {
+            console.warn('ensureNeutralTeamColor error:', e);
+            return false;
+        }
+    }
+
+    applyTeamColor(color) {
+        if (color === -1 || color === 24) {
+            const hasNeutral = this.ensureNeutralTeamColor();
+            if (hasNeutral) {
+                this.currentInstance.setTeamColor(24);
+            } else {
+                this.currentInstance.setTeamColor(0);
+            }
+        } else if (color >= 0 && color <= 15) {
+            this.currentInstance.setTeamColor(color);
+        }
     }
 
     selectAnimation(index) {
@@ -540,13 +609,10 @@ class War3ModelViewerApp {
             this.currentModel = null;
         }
 
-        // 重置线框和底板状态
+        // 重置线框状态
         this.wireframeBuffers = null;
         this.modelParser = null;
-        this.hiddenGeosets.clear();
-        this.groundGeosetIndices = [];
         document.getElementById('wireframe-checkbox').checked = false;
-        document.getElementById('ground-checkbox').checked = false;
 
         this.modelSource = modelPath;
 
@@ -598,17 +664,19 @@ class War3ModelViewerApp {
 
             this.currentModel = model;
 
-            // 解析模型文件以获取面数据和底板检测
+            // 解析模型文件以获取面数据
             await this.parseModelData(modelPath);
-
-            // 隐藏底板（默认）
-            this.setGroundVisible(false);
 
             const instance = model.addInstance();
             instance.setScene(this.scene);
             const teamColorSelect = document.getElementById('team-color-select');
             const teamColor = teamColorSelect ? parseInt(teamColorSelect.value) : 0;
-            instance.setTeamColor(teamColor);
+            if (teamColor === -1 || teamColor === 24) {
+                const hasNeutral = this.ensureNeutralTeamColor();
+                instance.setTeamColor(hasNeutral ? 24 : 0);
+            } else {
+                instance.setTeamColor(teamColor);
+            }
             instance.setSequenceLoopMode(2);
             // 旋转模型使其面向屏幕
             // 四元数：+X→+Z（朝向相机），+Z→+Y（保持直立）
@@ -677,34 +745,9 @@ class War3ModelViewerApp {
             parser.load(buffer);
 
             this.modelParser = parser;
-            this.detectGroundGeosets(parser);
         } catch (e) {
             console.warn('解析模型数据失败:', e);
             this.modelParser = null;
-        }
-    }
-
-    // ===== 底板检测 =====
-    detectGroundGeosets(parser) {
-        this.groundGeosetIndices = [];
-
-        if (!parser || !this.currentModel) return;
-
-        const modelBounds = parser.extent;
-        const modelHeight = modelBounds.max[2] - modelBounds.min[2];
-
-        if (modelHeight <= 0) return;
-
-        for (let i = 0; i < parser.geosets.length && i < this.currentModel.geosets.length; i++) {
-            const geoset = parser.geosets[i];
-            const extent = geoset.extent;
-            const geosetHeight = extent.max[2] - extent.min[2];
-
-            // 底板geoset：扁平（高度小于模型总高的5%）且位于模型底部
-            if (geosetHeight < modelHeight * 0.05 &&
-                Math.abs(extent.min[2] - modelBounds.min[2]) < modelHeight * 0.1) {
-                this.groundGeosetIndices.push(i);
-            }
         }
     }
 
@@ -986,10 +1029,7 @@ class War3ModelViewerApp {
         // 重置状态
         this.wireframeBuffers = null;
         this.modelParser = null;
-        this.hiddenGeosets.clear();
-        this.groundGeosetIndices = [];
         document.getElementById('wireframe-checkbox').checked = false;
-        document.getElementById('ground-checkbox').checked = false;
 
         const blobUrls = new Map();
         for (const file of files) {
@@ -1054,14 +1094,16 @@ class War3ModelViewerApp {
             // 解析模型数据
             await this.parseModelData(mdxFile);
 
-            // 隐藏底板（默认）
-            this.setGroundVisible(false);
-
             const instance = model.addInstance();
             instance.setScene(this.scene);
             const teamColorSelect = document.getElementById('team-color-select');
             const teamColor = teamColorSelect ? parseInt(teamColorSelect.value) : 0;
-            instance.setTeamColor(teamColor);
+            if (teamColor === -1 || teamColor === 24) {
+                const hasNeutral = this.ensureNeutralTeamColor();
+                instance.setTeamColor(hasNeutral ? 24 : 0);
+            } else {
+                instance.setTeamColor(teamColor);
+            }
             instance.setSequenceLoopMode(2);
             instance.setRotation([-0.5, -0.5, -0.5, 0.5]);
 
@@ -1100,8 +1142,6 @@ class War3ModelViewerApp {
             const originalRender = geoset.render.bind(geoset);
             geoset._originalRender = originalRender;
             geoset.render = () => {
-                // 检查是否被隐藏（底板）
-                if (this.hiddenGeosets.has(geoset.index)) return;
                 // 检查是否有线框缓冲区
                 if (geoset._wireframeBuffer) {
                     const gl = this.viewer.gl;
@@ -1184,18 +1224,6 @@ class War3ModelViewerApp {
         }
     }
 
-    // ===== 底板显示 =====
-    setGroundVisible(visible) {
-        this.hiddenGeosets.clear();
-
-        if (!visible) {
-            // 隐藏底板geoset
-            for (const index of this.groundGeosetIndices) {
-                this.hiddenGeosets.add(index);
-            }
-        }
-    }
-
     // ===== 画布大小 =====
     resizeCanvas() {
         const canvas = document.getElementById('canvas');
@@ -1247,5 +1275,5 @@ class War3ModelViewerApp {
 }
 
 window.addEventListener('DOMContentLoaded', () => {
-    new War3ModelViewerApp();
+    window.app = new War3ModelViewerApp();
 });
