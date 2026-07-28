@@ -39,7 +39,7 @@ class War3ModelViewerApp {
         };
 
         // War3资源目录（MPQ解压后的文件）
-        this.war3AssetsPath = 'War3Assets/';
+        this.war3AssetsPath = './War3Assets/';
         this.uploadedAssets = new Map(); // 用户上传的资源文件 blob URL
 
         this.init();
@@ -675,8 +675,8 @@ class War3ModelViewerApp {
 
         try {
             const [indexResp, transResp] = await Promise.all([
-                fetch('src/models-index.json'),
-                fetch('src/model-translations.json').catch(() => ({ ok: false }))
+                fetch('./models-index.json'),
+                fetch('./model-translations.json').catch(() => ({ ok: false }))
             ]);
             if (!indexResp.ok) {
                 throw new Error('索引文件加载失败: ' + indexResp.status);
