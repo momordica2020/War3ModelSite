@@ -593,6 +593,55 @@ class War3ModelViewerApp {
         });
 
         window.addEventListener('resize', () => this.onResize());
+
+        // ===== 移动端侧栏管理 =====
+        this.setupMobileSidebars();
+    }
+
+    setupMobileSidebars() {
+        const overlay = document.getElementById('mobile-overlay');
+        const sidebarLeft = document.querySelector('.sidebar-left');
+        const sidebarRight = document.querySelector('.sidebar-right');
+        const modelsBtn = document.getElementById('mobile-models-btn');
+        const rightHandle = document.getElementById('sidebar-right-handle');
+        const isMobile = () => window.innerWidth <= 768;
+
+        // 左侧栏开关
+        if (modelsBtn) {
+            modelsBtn.addEventListener('click', () => {
+                if (!isMobile()) return;
+                sidebarLeft.classList.add('mobile-open');
+                overlay.classList.add('visible');
+            });
+        }
+
+        // 点击遮罩关闭左侧栏
+        if (overlay) {
+            overlay.addEventListener('click', () => {
+                sidebarLeft.classList.remove('mobile-open');
+                overlay.classList.remove('visible');
+            });
+        }
+
+        // 右侧栏手柄点击切换
+        if (rightHandle) {
+            rightHandle.addEventListener('click', () => {
+                if (!isMobile()) return;
+                sidebarRight.classList.toggle('mobile-open');
+            });
+        }
+
+        // 选择模型后自动关闭左侧栏
+        document.querySelectorAll('.model-item').forEach(item => {
+            item.addEventListener('click', () => {
+                if (isMobile()) {
+                    setTimeout(() => {
+                        sidebarLeft.classList.remove('mobile-open');
+                        overlay.classList.remove('visible');
+                    }, 300);
+                }
+            });
+        });
     }
 
     ensureNeutralTeamColor() {
@@ -767,6 +816,70 @@ class War3ModelViewerApp {
             this.cameraDistance = Math.max(50, Math.min(2000, this.cameraDistance));
             updateCamera();
         });
+
+        // ===== 触控操作 =====
+        let touches = []; // 当前活跃的触摸点
+        let pinchStartDist = 0;
+        let pinchStartDistance = 0;
+
+        canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            this.autoRotate = false;
+            const btn = document.getElementById('auto-rotate-btn');
+            if (btn) btn.textContent = '自动旋转';
+
+            touches = Array.from(e.touches);
+
+            if (touches.length === 2) {
+                // 双指：开始缩放
+                const dx = touches[0].clientX - touches[1].clientX;
+                const dy = touches[0].clientY - touches[1].clientY;
+                pinchStartDist = Math.sqrt(dx * dx + dy * dy);
+                pinchStartDistance = this.cameraDistance;
+            } else if (touches.length === 1) {
+                // 单指：开始旋转
+                lastX = touches[0].clientX;
+                lastY = touches[0].clientY;
+            }
+        }, { passive: false });
+
+        canvas.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            touches = Array.from(e.touches);
+
+            if (touches.length === 2 && pinchStartDist > 0) {
+                // 双指缩放
+                const dx = touches[0].clientX - touches[1].clientX;
+                const dy = touches[0].clientY - touches[1].clientY;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                const scale = pinchStartDist / dist;
+                this.cameraDistance = Math.max(50, Math.min(2000, pinchStartDistance * scale));
+                updateCamera();
+            } else if (touches.length === 1) {
+                // 单指旋转
+                const dx = touches[0].clientX - lastX;
+                const dy = touches[0].clientY - lastY;
+                this.cameraAngleX -= dx * 0.01;
+                this.cameraAngleY += dy * 0.01;
+                this.cameraAngleY = Math.max(-Math.PI / 2 + 0.1, Math.min(Math.PI / 2 - 0.1, this.cameraAngleY));
+                lastX = touches[0].clientX;
+                lastY = touches[0].clientY;
+                updateCamera();
+            }
+        }, { passive: false });
+
+        canvas.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            touches = Array.from(e.touches);
+            if (touches.length === 0) {
+                pinchStartDist = 0;
+            } else if (touches.length === 1) {
+                // 从双指变单指，重置旋转起点
+                lastX = touches[0].clientX;
+                lastY = touches[0].clientY;
+                pinchStartDist = 0;
+            }
+        }, { passive: false });
 
         this.resetCamera = () => {
             this.cameraDistance = 500;
