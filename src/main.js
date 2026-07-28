@@ -517,8 +517,28 @@ class War3ModelViewerApp {
             if (item && this.currentInstance) {
                 const index = parseInt(item.dataset.index);
                 this.selectAnimation(index);
+                // 移动端：选择后收起下拉
+                const list = document.getElementById('animation-list');
+                const trigger = document.getElementById('animation-dropdown-trigger');
+                if (list && trigger && list.classList.contains('dropdown-open')) {
+                    list.classList.remove('dropdown-open');
+                    trigger.classList.remove('open');
+                    trigger.setAttribute('aria-expanded', 'false');
+                }
             }
         });
+
+        // 动作下拉触发器：点击切换展开/收起
+        const animTrigger = document.getElementById('animation-dropdown-trigger');
+        if (animTrigger) {
+            animTrigger.addEventListener('click', () => {
+                const list = document.getElementById('animation-list');
+                if (!list) return;
+                const isOpen = list.classList.toggle('dropdown-open');
+                animTrigger.classList.toggle('open', isOpen);
+                animTrigger.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+            });
+        }
 
         document.getElementById('play-btn').addEventListener('click', () => {
             if (this.currentInstance) {
@@ -595,10 +615,174 @@ class War3ModelViewerApp {
             }
         });
 
+        // ===== 移动端紧凑布局控件绑定 =====
+        this.setupMobileControls();
+
         window.addEventListener('resize', () => this.onResize());
 
         // ===== 移动端侧栏管理 =====
         this.setupMobileSidebars();
+    }
+
+    // ===== 移动端紧凑布局控件 =====
+    setupMobileControls() {
+        const mPlay = document.getElementById('play-btn-m');
+        const mPause = document.getElementById('pause-btn-m');
+        const mStop = document.getElementById('stop-btn-m');
+        const mLoop = document.getElementById('loop-checkbox-m');
+        const mSpeed = document.getElementById('speed-slider-m');
+        const mSpeedVal = document.getElementById('speed-value-m');
+        const mResetCam = document.getElementById('reset-camera-btn-m');
+        const mAutoRot = document.getElementById('auto-rotate-btn-m');
+        const mWireframe = document.getElementById('wireframe-checkbox-m');
+        const mBgColor = document.getElementById('bg-color-input-m');
+        const mTeamColor = document.getElementById('team-color-select-m');
+        const mAnimTrigger = document.getElementById('animation-dropdown-trigger-m');
+        const mAnimList = document.getElementById('animation-list-m');
+        const mAnimCurrent = document.getElementById('animation-current-name-m');
+
+        if (!mPlay) return;
+
+        // 动作下拉触发器
+        if (mAnimTrigger) {
+            mAnimTrigger.addEventListener('click', () => {
+                if (!mAnimList) return;
+                const isOpen = mAnimList.classList.toggle('dropdown-open');
+                mAnimTrigger.classList.toggle('open', isOpen);
+                mAnimTrigger.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+            });
+        }
+
+        // 动作列表点击
+        if (mAnimList) {
+            mAnimList.addEventListener('click', (e) => {
+                const item = e.target.closest('.animation-item');
+                if (item && this.currentInstance) {
+                    const index = parseInt(item.dataset.index);
+                    this.selectAnimation(index);
+                    // 收起下拉
+                    if (mAnimList.classList.contains('dropdown-open')) {
+                        mAnimList.classList.remove('dropdown-open');
+                        mAnimTrigger.classList.remove('open');
+                        mAnimTrigger.setAttribute('aria-expanded', 'false');
+                    }
+                }
+            });
+        }
+
+        // 播放
+        mPlay.addEventListener('click', () => {
+            if (this.currentInstance) {
+                this.isPaused = false;
+                const speed = parseFloat(mSpeed.value);
+                this.currentInstance.timeScale = speed;
+                // 同步桌面端
+                const dSpeed = document.getElementById('speed-slider');
+                if (dSpeed) dSpeed.value = mSpeed.value;
+                const dSpeedVal = document.getElementById('speed-value');
+                if (dSpeedVal) dSpeedVal.textContent = speed.toFixed(2) + 'x';
+            }
+        });
+
+        // 暂停
+        mPause.addEventListener('click', () => {
+            if (this.currentInstance) {
+                this.isPaused = true;
+                this.currentInstance.timeScale = 0;
+            }
+        });
+
+        // 停止
+        mStop.addEventListener('click', () => {
+            if (this.currentInstance) {
+                this.currentInstance.setSequence(-1);
+                this.isPaused = false;
+                // 同步动作项active状态
+                document.querySelectorAll('.animation-item').forEach(i => i.classList.remove('active'));
+                if (mAnimCurrent) mAnimCurrent.textContent = '未选择';
+                const dAnimName = document.getElementById('animation-current-name');
+                if (dAnimName) dAnimName.textContent = '未选择';
+            }
+        });
+
+        // 循环
+        if (mLoop) {
+            mLoop.addEventListener('change', (e) => {
+                if (this.currentInstance) {
+                    this.currentInstance.setSequenceLoopMode(e.target.checked ? 2 : 0);
+                }
+                // 同步桌面端
+                const dLoop = document.getElementById('loop-checkbox');
+                if (dLoop) dLoop.checked = e.target.checked;
+            });
+        }
+
+        // 速度
+        if (mSpeed) {
+            mSpeed.addEventListener('input', (e) => {
+                const speed = parseFloat(e.target.value);
+                if (mSpeedVal) mSpeedVal.textContent = speed.toFixed(2) + 'x';
+                if (this.currentInstance && !this.isPaused) {
+                    this.currentInstance.timeScale = speed;
+                }
+                // 同步桌面端
+                const dSpeed = document.getElementById('speed-slider');
+                const dSpeedVal = document.getElementById('speed-value');
+                if (dSpeed) dSpeed.value = speed;
+                if (dSpeedVal) dSpeedVal.textContent = speed.toFixed(2) + 'x';
+            });
+        }
+
+        // 重置视角
+        if (mResetCam) {
+            mResetCam.addEventListener('click', () => {
+                this.resetCamera();
+            });
+        }
+
+        // 自动旋转
+        if (mAutoRot) {
+            mAutoRot.addEventListener('click', () => {
+                this.autoRotate = !this.autoRotate;
+                mAutoRot.textContent = this.autoRotate ? '停转' : '自转';
+                // 同步桌面端
+                const dBtn = document.getElementById('auto-rotate-btn');
+                if (dBtn) dBtn.textContent = this.autoRotate ? '停止旋转' : '自动旋转';
+            });
+        }
+
+        // 线框
+        if (mWireframe) {
+            mWireframe.addEventListener('change', (e) => {
+                this.setWireframe(e.target.checked);
+                // 同步桌面端
+                const dWire = document.getElementById('wireframe-checkbox');
+                if (dWire) dWire.checked = e.target.checked;
+            });
+        }
+
+        // 背景色
+        if (mBgColor) {
+            mBgColor.addEventListener('input', (e) => {
+                this.setBackgroundColor(e.target.value);
+                // 同步桌面端
+                const dBg = document.getElementById('bg-color-input');
+                if (dBg) dBg.value = e.target.value;
+            });
+        }
+
+        // 队伍颜色
+        if (mTeamColor) {
+            mTeamColor.addEventListener('change', (e) => {
+                if (this.currentInstance) {
+                    const color = parseInt(e.target.value);
+                    this.applyTeamColor(color);
+                }
+                // 同步桌面端
+                const dTeam = document.getElementById('team-color-select');
+                if (dTeam) dTeam.value = e.target.value;
+            });
+        }
     }
 
     setupMobileSidebars() {
@@ -637,182 +821,18 @@ class War3ModelViewerApp {
             });
         });
 
-        // ===== 右侧栏：底部三段式抽屉 =====
-        // 状态: collapsed(只显手柄) -> half(显示动作列表, 默认) -> full(全部展开)
-        let drawerState = 'half'; // collapsed | half | full
-
+        // ===== 右侧栏：移动端已改为固定底部紧凑栏，不再需要抽屉状态管理 =====
+        // 保留 setDrawerState 仅用于向后兼容（实际上不再生效）
+        let drawerState = 'half';
         const setDrawerState = (state) => {
             drawerState = state;
-            sidebarRight.classList.remove('mobile-collapsed', 'mobile-half', 'mobile-full');
-            sidebarRight.classList.add('mobile-' + state);
-
-            // 更新方向指示器位置，避免被底部抽屉遮挡
-            const indicator = document.getElementById('orientation-indicator');
-            if (indicator && isMobile()) {
-                const isSmall = window.innerWidth <= 480;
-                const halfRatio = isSmall ? 0.45 : 0.40;
-                const fullRatio = isSmall ? 0.85 : 0.80;
-                let bottomPx;
-                if (state === 'collapsed') {
-                    bottomPx = 52;
-                } else if (state === 'half') {
-                    bottomPx = window.innerHeight * halfRatio + 8;
-                } else {
-                    bottomPx = window.innerHeight * fullRatio + 8;
-                }
-                indicator.style.bottom = bottomPx + 'px';
-            }
+            // 不再添加 mobile-* 状态类，避免影响固定底部栏样式
         };
 
-        // 初始状态：移动端默认半开
-        if (isMobile()) {
-            setDrawerState('half');
-        }
-
+        // 手柄已隐藏，不再绑定拖拽逻辑
         window.addEventListener('resize', () => {
-            if (isMobile() && !sidebarRight.classList.contains('mobile-half') &&
-                !sidebarRight.classList.contains('mobile-full') &&
-                !sidebarRight.classList.contains('mobile-collapsed')) {
-                setDrawerState('half');
-            }
+            // 移动端右侧栏现为固定底部，无需调整
         });
-
-        // 手柄点击/拖拽：三段式状态切换
-        if (rightHandle) {
-            let startY = 0;
-            let startState = null;
-            let isDragging = false;
-            let startVelocity = 0;
-            let lastY = 0;
-            let lastTime = 0;
-            let movedDistance = 0;
-            let suppressClick = false;
-
-            const getDrawerHeight = () => {
-                const rect = sidebarRight.getBoundingClientRect();
-                return rect.height;
-            };
-
-            const getVisibleHeight = () => {
-                const rect = sidebarRight.getBoundingClientRect();
-                return window.innerHeight - rect.top;
-            };
-
-            // 点击切换：collapsed -> half -> full -> half
-            rightHandle.addEventListener('click', (e) => {
-                if (!isMobile()) return;
-                if (suppressClick) {
-                    suppressClick = false;
-                    return;
-                }
-                if (drawerState === 'collapsed') {
-                    setDrawerState('half');
-                } else if (drawerState === 'half') {
-                    setDrawerState('full');
-                } else {
-                    setDrawerState('half');
-                }
-            });
-
-            rightHandle.addEventListener('touchstart', (e) => {
-                if (!isMobile()) return;
-                isDragging = true;
-                startY = e.touches[0].clientY;
-                startState = drawerState;
-                lastY = startY;
-                lastTime = Date.now();
-                movedDistance = 0;
-                startVelocity = 0;
-                sidebarRight.style.transition = 'none';
-            }, { passive: true });
-
-            rightHandle.addEventListener('touchmove', (e) => {
-                if (!isDragging || !isMobile()) return;
-                const dy = e.touches[0].clientY - startY;
-                movedDistance = Math.abs(dy);
-                const h = getDrawerHeight();
-                const isSmall = window.innerWidth <= 480;
-                const halfRatio = isSmall ? 0.45 : 0.40;
-                const halfPx = window.innerHeight * halfRatio;
-
-                let visiblePx;
-                if (startState === 'collapsed') {
-                    visiblePx = 44 - dy;
-                } else if (startState === 'half') {
-                    visiblePx = halfPx - dy;
-                } else {
-                    visiblePx = h - dy;
-                }
-
-                visiblePx = Math.max(44, Math.min(h, visiblePx));
-                const translateY = h - visiblePx;
-                sidebarRight.style.transform = 'translateY(' + translateY + 'px)';
-
-                // 拖拽时同步更新方向指示器位置
-                const indicator = document.getElementById('orientation-indicator');
-                if (indicator) {
-                    indicator.style.bottom = (visiblePx + 8) + 'px';
-                }
-
-                const now = Date.now();
-                const dt = now - lastTime;
-                if (dt > 0) {
-                    startVelocity = (e.touches[0].clientY - lastY) / dt;
-                }
-                lastY = e.touches[0].clientY;
-                lastTime = now;
-            }, { passive: true });
-
-            rightHandle.addEventListener('touchend', (e) => {
-                if (!isDragging || !isMobile()) return;
-                isDragging = false;
-                sidebarRight.style.transition = '';
-                sidebarRight.style.transform = '';
-
-                // 移动距离小，视为点击（让 click 事件处理）
-                if (movedDistance < 8) {
-                    suppressClick = false;
-                    return;
-                }
-
-                // 移动距离大，阻止后续 click 事件
-                suppressClick = true;
-
-                const h = getDrawerHeight();
-                const visiblePx = getVisibleHeight();
-                const isSmall = window.innerWidth <= 480;
-                const halfRatio = isSmall ? 0.45 : 0.40;
-                const halfPx = window.innerHeight * halfRatio;
-
-                // 快速滑动
-                const fastSwipe = Math.abs(startVelocity) > 0.3;
-                if (fastSwipe) {
-                    if (startVelocity > 0) {
-                        if (drawerState === 'full') setDrawerState('half');
-                        else if (drawerState === 'half') setDrawerState('collapsed');
-                        else setDrawerState('collapsed');
-                    } else {
-                        if (drawerState === 'collapsed') setDrawerState('half');
-                        else if (drawerState === 'half') setDrawerState('full');
-                        else setDrawerState('full');
-                    }
-                    return;
-                }
-
-                // 就近吸附
-                const distToCollapsed = Math.abs(visiblePx - 44);
-                const distToHalf = Math.abs(visiblePx - halfPx);
-                const distToFull = Math.abs(visiblePx - h);
-
-                if (distToCollapsed < distToHalf && distToCollapsed < distToFull) {
-                    setDrawerState('collapsed');
-                } else if (distToHalf < distToCollapsed && distToHalf < distToFull) {
-                    setDrawerState('half');
-                } else {
-                    setDrawerState('full');
-                }
-            });
-        }
     }
 
     ensureNeutralTeamColor() {
@@ -895,12 +915,26 @@ class War3ModelViewerApp {
         if (!this.currentInstance) return;
         this.currentInstance.setSequence(index);
         this.isPaused = false;
-        const speed = parseFloat(document.getElementById('speed-slider').value);
+        const dSpeed = document.getElementById('speed-slider');
+        const speed = parseFloat(dSpeed ? dSpeed.value : '1');
         this.currentInstance.timeScale = speed;
 
+        // 两个列表都同步高亮
         document.querySelectorAll('.animation-item').forEach(i => i.classList.remove('active'));
-        const item = document.querySelector(`.animation-item[data-index="${index}"]`);
-        if (item) item.classList.add('active');
+        document.querySelectorAll(`.animation-item[data-index="${index}"]`).forEach(i => i.classList.add('active'));
+
+        // 获取动作名
+        const firstItem = document.querySelector(`.animation-item[data-index="${index}"]`);
+        const animName = firstItem ? firstItem.querySelector('.animation-item-name') : null;
+        const nameText = animName ? animName.textContent : ('动作 ' + (index + 1));
+
+        // 同步桌面端下拉显示
+        const dName = document.getElementById('animation-current-name');
+        if (dName) dName.textContent = nameText;
+
+        // 同步移动端下拉显示
+        const mName = document.getElementById('animation-current-name-m');
+        if (mName) mName.textContent = nameText;
     }
 
     // ===== 相机控制 =====
@@ -1279,7 +1313,12 @@ class War3ModelViewerApp {
                     return this.war3AssetsPath + this.fixCommonCaseIssues(normalizedPath);
                 }
 
-                // 3. 自定义模型或简单文件名：相对于模型目录解析
+                // 3. 自定义模型：带目录前缀的路径（如 Textures/xxx.blp）优先在 War3Assets 中查找
+                if (!isWar3Model && normalizedPath.includes('/')) {
+                    return this.war3AssetsPath + this.fixCommonCaseIssues(normalizedPath);
+                }
+
+                // 4. 自定义模型或简单文件名：相对于模型目录解析
                 const lastSlash = modelPath.lastIndexOf('/');
                 const baseDir = lastSlash >= 0 ? modelPath.substring(0, lastSlash + 1) : '';
 
@@ -1288,7 +1327,7 @@ class War3ModelViewerApp {
                     return this.war3AssetsPath + this.fixCommonCaseIssues(normalizedPath);
                 }
 
-                // 4. 自定义模型：返回 Promise，探测文件实际大小写
+                // 5. 自定义模型：返回 Promise，探测文件实际大小写
                 return resolveCustomTexture(fileName);
             };
 
@@ -1410,32 +1449,69 @@ class War3ModelViewerApp {
 
     // ===== 动作列表 =====
     updateAnimationList(model) {
+        // 桌面端列表
         const list = document.getElementById('animation-list');
-        list.innerHTML = '';
-
-        if (model.sequences.length === 0) {
-            list.innerHTML = '<div class="animation-empty">无可用动作</div>';
-            return;
+        if (list) {
+            list.innerHTML = '';
+            if (model.sequences.length === 0) {
+                list.innerHTML = '<div class="animation-empty">无可用动作</div>';
+            } else {
+                model.sequences.forEach((seq, index) => {
+                    list.appendChild(this.createAnimationItem(seq, index));
+                });
+            }
         }
 
-        model.sequences.forEach((seq, index) => {
-            const item = document.createElement('div');
-            item.className = 'animation-item';
-            item.dataset.index = index;
+        // 移动端列表
+        const mList = document.getElementById('animation-list-m');
+        if (mList) {
+            mList.innerHTML = '';
+            if (model.sequences.length === 0) {
+                mList.innerHTML = '<div class="animation-empty">无可用动作</div>';
+            } else {
+                model.sequences.forEach((seq, index) => {
+                    mList.appendChild(this.createAnimationItem(seq, index));
+                });
+            }
+            // 重置移动端下拉
+            mList.classList.remove('dropdown-open');
+            const mTrigger = document.getElementById('animation-dropdown-trigger-m');
+            if (mTrigger) {
+                mTrigger.classList.remove('open');
+                mTrigger.setAttribute('aria-expanded', 'false');
+            }
+            const mName = document.getElementById('animation-current-name-m');
+            if (mName) mName.textContent = '未选择';
+        }
 
-            const name = document.createElement('span');
-            name.className = 'animation-item-name';
-            name.textContent = seq.name || ('动作 ' + (index + 1));
+        // 重置桌面端下拉（如果有）
+        const currentNameEl = document.getElementById('animation-current-name');
+        const trigger = document.getElementById('animation-dropdown-trigger');
+        if (currentNameEl) currentNameEl.textContent = '未选择';
+        if (trigger) {
+            trigger.classList.remove('open');
+            trigger.setAttribute('aria-expanded', 'false');
+        }
+        if (list) list.classList.remove('dropdown-open');
+    }
 
-            const duration = document.createElement('span');
-            duration.className = 'animation-item-duration';
-            const durationSec = (seq.interval[1] - seq.interval[0]) / 1000;
-            duration.textContent = durationSec.toFixed(2) + '秒';
+    createAnimationItem(seq, index) {
+        const item = document.createElement('div');
+        item.className = 'animation-item';
+        item.dataset.index = index;
 
-            item.appendChild(name);
-            item.appendChild(duration);
-            list.appendChild(item);
-        });
+        const name = document.createElement('span');
+        name.className = 'animation-item-name';
+        name.textContent = seq.name || ('动作 ' + (index + 1));
+
+        const duration = document.createElement('span');
+        duration.className = 'animation-item-duration';
+        const durationSec = (seq.interval[1] - seq.interval[0]) / 1000;
+        duration.textContent = durationSec.toFixed(2) + '秒';
+
+        item.appendChild(name);
+        item.appendChild(duration);
+        return item;
     }
 
     // ===== 模型树 =====

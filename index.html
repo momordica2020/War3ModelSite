@@ -73,8 +73,11 @@
                     <div class="handle-bar"></div>
                     <span class="handle-text">动作与设置</span>
                 </div>
-                <div class="panel">
-                    <h2>动作列表</h2>
+
+                <!-- 桌面端布局：两个panel -->
+                <div class="desktop-layout">
+                <div class="panel panel-anim">
+                    <h2 class="panel-title">动作列表</h2>
                     <div id="animation-list" class="animation-list">
                         <div class="animation-empty">加载模型后显示动作</div>
                     </div>
@@ -95,9 +98,8 @@
                     </div>
                 </div>
 
-                <div class="mobile-scroll-area">
-                <div class="panel">
-                    <h2>视角与显示</h2>
+                <div class="panel panel-display">
+                    <h2 class="panel-title">视角与显示</h2>
                     <div class="camera-controls">
                         <div class="camera-buttons-row">
                             <button id="reset-camera-btn" class="btn">重置视角</button>
@@ -145,6 +147,70 @@
                         </label>
                     </div>
                 </div>
+                </div>
+
+                <!-- 移动端紧凑布局：5行 -->
+                <div class="mobile-compact">
+                    <!-- 行1：动作下拉 -->
+                    <div class="mc-row mc-row-1">
+                        <button class="animation-dropdown-trigger" id="animation-dropdown-trigger-m" type="button" aria-expanded="false">
+                            <span class="dropdown-label">动作</span>
+                            <span class="dropdown-current" id="animation-current-name-m">未选择</span>
+                            <span class="dropdown-arrow">▼</span>
+                        </button>
+                        <div id="animation-list-m" class="animation-list animation-list-m">
+                            <div class="animation-empty">加载模型后显示动作</div>
+                        </div>
+                    </div>
+                    <!-- 行2：播放 暂停 停止 循环 -->
+                    <div class="mc-row mc-row-2">
+                        <button class="btn mc-btn" id="play-btn-m">播放</button>
+                        <button class="btn mc-btn" id="pause-btn-m">暂停</button>
+                        <button class="btn mc-btn" id="stop-btn-m">停止</button>
+                        <label class="mc-check">
+                            <input type="checkbox" id="loop-checkbox-m" checked>
+                            <span>循环</span>
+                        </label>
+                    </div>
+                    <!-- 行3：速度滑块 -->
+                    <div class="mc-row mc-row-3">
+                        <span class="mc-speed-label">速度 <span id="speed-value-m">1.0x</span></span>
+                        <input type="range" id="speed-slider-m" min="0.05" max="3" step="0.05" value="1">
+                    </div>
+                    <!-- 行4：重置 自转 线框 -->
+                    <div class="mc-row mc-row-4">
+                        <button class="btn mc-btn" id="reset-camera-btn-m">重置</button>
+                        <button class="btn mc-btn" id="auto-rotate-btn-m">自转</button>
+                        <label class="mc-check">
+                            <input type="checkbox" id="wireframe-checkbox-m">
+                            <span>线框</span>
+                        </label>
+                    </div>
+                    <!-- 行5：背景色 队伍色 -->
+                    <div class="mc-row mc-row-5">
+                        <label class="mc-color">
+                            <span>背景</span>
+                            <input type="color" id="bg-color-input-m" value="#1a1a2e">
+                        </label>
+                        <label class="mc-select">
+                            <span>队伍</span>
+                            <select id="team-color-select-m">
+                                <option value="-1">中立</option>
+                                <option value="0">红</option>
+                                <option value="1">蓝</option>
+                                <option value="2">青</option>
+                                <option value="3">紫</option>
+                                <option value="4">黄</option>
+                                <option value="5">橙</option>
+                                <option value="6">绿</option>
+                                <option value="7">粉</option>
+                                <option value="8">灰</option>
+                                <option value="9">浅蓝</option>
+                                <option value="10">深绿</option>
+                                <option value="11">棕</option>
+                            </select>
+                        </label>
+                    </div>
                 </div>
             </aside>
         </div>
