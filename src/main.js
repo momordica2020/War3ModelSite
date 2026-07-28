@@ -43,13 +43,40 @@ function patchWebGLExtensions(viewer) {
         return false;
     }
 
-    // 覆盖 ensureExtension，对 WebGL2 核心功能返回 polyfill
+    // ---- 1. Patch texImage2D: WebGL 2.0 下 FLOAT 纹理需要 sized internal format ----
+    // mdx-m3-viewer 使用 gl.RGBA + gl.FLOAT（unsized），某些驱动会静默失败
+    // 改为 gl.RGBA32F 等 sized internal format
+    const originalTexImage2D = gl.texImage2D.bind(gl);
+    gl.texImage2D = function (target, level, internalformat, ...rest) {
+        if (internalformat === gl.RGBA && rest.length >= 5 && rest[4] === gl.FLOAT) {
+            internalformat = gl.RGBA32F;
+        } else if (internalformat === gl.RGB && rest.length >= 5 && rest[4] === gl.FLOAT) {
+            internalformat = gl.RGB32F;
+        } else if (internalformat === gl.LUMINANCE && rest.length >= 5 && rest[4] === gl.FLOAT) {
+            internalformat = gl.R32F;
+        } else if (internalformat === gl.LUMINANCE_ALPHA && rest.length >= 5 && rest[4] === gl.FLOAT) {
+            internalformat = gl.RG32F;
+        }
+        return originalTexImage2D(target, level, internalformat, ...rest);
+    };
+
+    // ---- 2. 覆盖 ensureExtension ----
     const originalEnsureExtension = webgl.ensureExtension.bind(webgl);
     webgl.ensureExtension = function (name) {
         if (name === 'OES_texture_float') {
-            // WebGL 2.0 原生支持 FLOAT 纹理
             if (!this.extensions[name]) {
                 this.extensions[name] = {};
+            }
+            return true;
+        }
+        if (name === 'OES_texture_float_linear') {
+            // 浮点纹理线性过滤 — bone texture 可能使用 LINEAR，缺少此扩展会导致纹理 incomplete
+            const real = originalEnsureExtension(name);
+            if (!real) {
+                if (!this.extensions[name]) {
+                    this.extensions[name] = {};
+                }
+                return true;
             }
             return true;
         }
@@ -70,7 +97,7 @@ function patchWebGLExtensions(viewer) {
         return originalEnsureExtension(name);
     };
 
-    console.log('[WebGL2Polyfill] WebGL 2.0 扩展 polyfill 已安装');
+    console.log('[WebGL2Polyfill] WebGL 2.0 扩展 polyfill 已安装 (texImage2D sized format + OES_texture_float + OES_texture_float_linear + ANGLE_instanced_arrays)');
     return true;
 }
 
@@ -1604,6 +1631,18 @@ class War3ModelViewerApp {
 
         // 传入实际帧时间，确保动画速度正确（不随刷新率变化）
         this.viewer.updateAndRender(dt);
+
+        // 首帧渲染后检查 GL 错误（仅检查一次）
+        if (!this._glErrorChecked && this.currentInstance) {
+            this._glErrorChecked = true;
+            const gl = this.viewer.gl;
+            const err = gl.getError();
+            if (err !== gl.NO_ERROR) {
+                console.error('[Render] 首帧后检测到 GL 错误: 0x' + err.toString(16));
+            } else {
+                console.log('[Render] 首帧渲染 GL 状态正常');
+            }
+        }
     }
 }
 
