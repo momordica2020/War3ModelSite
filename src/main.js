@@ -639,6 +639,75 @@ class War3ModelViewerApp {
 
             const isWar3Model = modelPath.startsWith('War3Assets/');
 
+            // 自定义模型贴图大小写缓存：key=小写 URL, value=实际可访问的 URL
+            const customTextureCaseCache = new Map();
+            // 自定义模型目录文件清单缓存：key=目录 URL, value=Set<小写文件名>
+            const customDirListingCache = new Map();
+
+            // 异步探测 URL 是否存在
+            const probeUrl = async (url) => {
+                if (customTextureCaseCache.has(url)) {
+                    return customTextureCaseCache.get(url);
+                }
+                try {
+                    const response = await fetch(url, { method: 'HEAD' });
+                    if (response.ok) {
+                        customTextureCaseCache.set(url, url);
+                        return url;
+                    }
+                } catch (e) {
+                    // 网络错误，按不存在处理
+                }
+                customTextureCaseCache.set(url, null);
+                return null;
+            };
+
+            // 获取目录下所有文件的小写集合
+            const listDirLowercase = async (dirUrl) => {
+                if (customDirListingCache.has(dirUrl)) {
+                    return customDirListingCache.get(dirUrl);
+                }
+                // 用 fetch 取 HTML 目录列表（仅在某些静态服务器上有效）
+                // 如果不支持，退化为单文件探测
+                const result = new Set();
+                customDirListingCache.set(dirUrl, result);
+                return result;
+            };
+
+            // 异步解析自定义模型贴图：尝试多种大小写变体
+            const customTextureResolveCache = new Map(); // fileName -> Promise<url>
+            const resolveCustomTexture = (fileName) => {
+                if (customTextureResolveCache.has(fileName)) {
+                    return customTextureResolveCache.get(fileName);
+                }
+                const promise = (async () => {
+                    const lastSlash = modelPath.lastIndexOf('/');
+                    const baseDir = lastSlash >= 0 ? modelPath.substring(0, lastSlash + 1) : '';
+                    const baseUrl = baseDir + fileName;
+                    const lowerFile = fileName.toLowerCase();
+
+                    // 1. 尝试精确文件名
+                    let found = await probeUrl(baseUrl);
+                    if (found) return found;
+
+                    // 2. 尝试小写文件名
+                    const lowerUrl = baseDir + lowerFile;
+                    found = await probeUrl(lowerUrl);
+                    if (found) return found;
+
+                    // 3. 尝试首字母大写
+                    const capFile = lowerFile.charAt(0).toUpperCase() + lowerFile.slice(1);
+                    const capUrl = baseDir + capFile;
+                    found = await probeUrl(capUrl);
+                    if (found) return found;
+
+                    // 4. 都找不到，返回原始小写（让浏览器报告 404 以便调试）
+                    return lowerUrl;
+                })();
+                customTextureResolveCache.set(fileName, promise);
+                return promise;
+            };
+
             const pathSolver = (path) => {
                 if (path === modelPath) {
                     return path;
@@ -675,9 +744,8 @@ class War3ModelViewerApp {
                     return this.war3AssetsPath + this.fixCommonCaseIssues(normalizedPath);
                 }
 
-                // 自定义模型：如果路径包含 ./ 或 ../，需要规范化
-                // 但通常贴图是简单文件名，直接拼接 baseDir
-                return baseDir + path;
+                // 4. 自定义模型：返回 Promise，探测文件实际大小写
+                return resolveCustomTexture(fileName);
             };
 
             const model = await this.viewer.load(modelPath, pathSolver);
