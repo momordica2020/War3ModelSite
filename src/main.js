@@ -5,6 +5,75 @@ const ModelViewer = ModelViewerLib.viewer.ModelViewer;
 const handlers = ModelViewerLib.viewer.handlers;
 const MdlxModel = ModelViewerLib.parsers.mdlx.Model;
 
+/**
+ * Monkey-patch: 让 mdx-m3-viewer 优先使用 WebGL 2.0 context
+ * WebGL 2.0 原生支持浮点纹理和实例化渲染，不需要 OES_texture_float / ANGLE_instanced_arrays 扩展
+ * 很多手机浏览器在 WebGL 1.0 下不支持这些扩展，但在 WebGL 2.0 下原生支持
+ */
+function setupWebGL2Polyfill() {
+    const originalGetContext = HTMLCanvasElement.prototype.getContext;
+
+    HTMLCanvasElement.prototype.getContext = function (contextType, ...args) {
+        // 当请求 webgl 或 experimental-webgl 时，优先尝试 webgl2
+        if (contextType === 'webgl' || contextType === 'experimental-webgl') {
+            let gl = originalGetContext.call(this, 'webgl2', ...args);
+            if (gl) {
+                console.log('[WebGL2Polyfill] 使用 WebGL 2.0 context');
+                return gl;
+            }
+            // 回退到原本请求的 context 类型
+            console.log('[WebGL2Polyfill] WebGL 2.0 不可用，回退到 ' + contextType);
+        }
+        return originalGetContext.call(this, contextType, ...args);
+    };
+}
+
+/**
+ * 为 WebGL 2.0 context 创建扩展 polyfill
+ * mdx-m3-viewer 调用 ensureExtension('OES_texture_float') 和 ensureExtension('ANGLE_instanced_arrays')
+ * 在 WebGL 2.0 下这些是核心功能，需要返回兼容的 polyfill 对象
+ */
+function patchWebGLExtensions(viewer) {
+    const gl = viewer.gl;
+    const webgl = viewer.webgl;
+    const isWebGL2 = typeof gl.drawArraysInstanced === 'function'; // WebGL2 独有方法
+
+    if (!isWebGL2) {
+        console.log('[WebGL2Polyfill] 当前为 WebGL 1.0，不应用 polyfill');
+        return false;
+    }
+
+    // 覆盖 ensureExtension，对 WebGL2 核心功能返回 polyfill
+    const originalEnsureExtension = webgl.ensureExtension.bind(webgl);
+    webgl.ensureExtension = function (name) {
+        if (name === 'OES_texture_float') {
+            // WebGL 2.0 原生支持 FLOAT 纹理
+            if (!this.extensions[name]) {
+                this.extensions[name] = {};
+            }
+            return true;
+        }
+        if (name === 'ANGLE_instanced_arrays') {
+            // WebGL 2.0 原生支持实例化渲染，创建兼容 API 的 polyfill
+            if (!this.extensions[name]) {
+                this.extensions[name] = {
+                    vertexAttribDivisorANGLE: (index, divisor) => gl.vertexAttribDivisor(index, divisor),
+                    drawArraysInstancedANGLE: (mode, first, count, primcount) =>
+                        gl.drawArraysInstanced(mode, first, count, primcount),
+                    drawElementsInstancedANGLE: (mode, count, type, offset, primcount) =>
+                        gl.drawElementsInstanced(mode, count, type, offset, primcount),
+                };
+            }
+            return true;
+        }
+        // 其他扩展走原逻辑
+        return originalEnsureExtension(name);
+    };
+
+    console.log('[WebGL2Polyfill] WebGL 2.0 扩展 polyfill 已安装');
+    return true;
+}
+
 class War3ModelViewerApp {
     constructor() {
         this.viewer = null;
@@ -141,6 +210,19 @@ class War3ModelViewerApp {
         // 初始化皮肤（在渲染之前）
         this.initTheme();
 
+        // 预检：用临时 canvas 检测 WebGL 1.0 扩展支持
+        // 只有缺少扩展时才启用 WebGL 2.0 polyfill，避免影响桌面端
+        const testCanvas = document.createElement('canvas');
+        const testCtx = testCanvas.getContext('webgl', { alpha: false });
+        const hasFloatExt = testCtx && testCtx.getExtension('OES_texture_float');
+        const hasInstancedExt = testCtx && testCtx.getExtension('ANGLE_instanced_arrays');
+        const needsWebGL2 = !hasFloatExt || !hasInstancedExt;
+        console.log('[Init] WebGL 1.0 扩展检测: OES_texture_float=' + !!hasFloatExt + ', ANGLE_instanced_arrays=' + !!hasInstancedExt + ', 需要WebGL2: ' + needsWebGL2);
+        if (needsWebGL2) {
+            setupWebGL2Polyfill();
+            console.log('[Init] 已启用 WebGL 2.0 polyfill');
+        }
+
         const canvas = document.getElementById('canvas');
         this.resizeCanvas();
 
@@ -152,6 +234,9 @@ class War3ModelViewerApp {
             alert('WebGL 不可用，请使用支持 WebGL 的浏览器。错误: ' + e.message);
             return;
         }
+
+        // 为 WebGL 2.0 context 安装扩展 polyfill
+        const polyfilled = patchWebGLExtensions(this.viewer);
 
         this.scene = this.viewer.addScene();
         const savedBg = localStorage.getItem('war3-bg-color');
@@ -166,16 +251,17 @@ class War3ModelViewerApp {
             console.error('Viewer error:', error);
         });
 
-        // 检测 WebGL 扩展支持（MDX handler 需要）
+        // 检测 WebGL 版本和扩展支持
         const gl = this.viewer.gl;
-        const extFloat = gl.getExtension('OES_texture_float');
-        const extInstanced = gl.getExtension('ANGLE_instanced_arrays');
-        console.log('[Init] WebGL 扩展检测: OES_texture_float=' + !!extFloat + ', ANGLE_instanced_arrays=' + !!extInstanced);
-        if (!extFloat || !extInstanced) {
-            const missing = [];
-            if (!extFloat) missing.push('OES_texture_float');
-            if (!extInstanced) missing.push('ANGLE_instanced_arrays');
-            console.error('[Init] 缺少必要的 WebGL 扩展: ' + missing.join(', '));
+        const isWebGL2 = typeof gl.drawArraysInstanced === 'function';
+        console.log('[Init] WebGL 版本: ' + (isWebGL2 ? '2.0' : '1.0') + ', polyfill: ' + polyfilled);
+        if (!isWebGL2) {
+            const extFloat = gl.getExtension('OES_texture_float');
+            const extInstanced = gl.getExtension('ANGLE_instanced_arrays');
+            console.log('[Init] WebGL 1.0 扩展: OES_texture_float=' + !!extFloat + ', ANGLE_instanced_arrays=' + !!extInstanced);
+            if (!extFloat || !extInstanced) {
+                console.error('[Init] WebGL 1.0 下缺少扩展，MDX handler 可能注册失败');
+            }
         }
 
         let mdxHandlerOk = false;
@@ -934,22 +1020,16 @@ class War3ModelViewerApp {
             console.error('加载模型失败:', error);
             const errMsg = error && error.message ? error.message : String(error);
             document.getElementById('model-info').textContent = '加载失败: ' + errMsg;
-            // 检查 WebGL 扩展和 handler 状态
             const gl = this.viewer && this.viewer.gl;
-            const hasFloat = gl && !!gl.getExtension('OES_texture_float');
-            const hasInstanced = gl && !!gl.getExtension('ANGLE_instanced_arrays');
+            const isWebGL2 = gl && typeof gl.drawArraysInstanced === 'function';
             const details = [
                 '错误: ' + errMsg,
                 '模型路径: ' + modelPath,
-                'Viewer: ' + (this.viewer ? '已创建' : '未创建'),
-                'Scene: ' + (this.scene ? '已初始化' : '未初始化'),
-                'WebGL扩展: OES_texture_float=' + hasFloat + ', ANGLE_instanced_arrays=' + hasInstanced,
+                'WebGL版本: ' + (isWebGL2 ? '2.0' : '1.0'),
             ].join('\n');
             console.error('详细错误信息:\n' + details);
-            if (!hasFloat || !hasInstanced) {
-                alert('加载模型失败:\n您的浏览器不支持必要的 WebGL 扩展\n\n缺少: ' +
-                    [!hasFloat ? 'OES_texture_float' : '', !hasInstanced ? 'ANGLE_instanced_arrays' : ''].filter(x => x).join(', ') +
-                    '\n\n请尝试使用支持 WebGL 2.0 的浏览器（如 Chrome）');
+            if (!isWebGL2) {
+                alert('加载模型失败:\n您的浏览器仅支持 WebGL 1.0 且缺少必要扩展\n\n请更新浏览器到最新版本');
             } else {
                 alert('加载模型失败:\n' + errMsg + '\n\n详细信息请打开调试面板 (右下角🐛按钮)');
             }
