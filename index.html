@@ -2,7 +2,9 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>魔兽争霸3 3D模型查看器</title>
     <link rel="stylesheet" href="src/style.css">
 </head>
@@ -141,5 +143,18 @@
             <p>使用 mdx-m3-viewer 库构建 | 魔兽争霸3模型查看器</p>
         </footer>
     </div>
+
+    <!-- 移动端调试日志面板 -->
+    <div id="debug-panel" class="debug-panel">
+        <div class="debug-panel-header" id="debug-panel-header">
+            <span class="debug-panel-title">📋 调试日志</span>
+            <div class="debug-panel-controls">
+                <button id="debug-clear-btn">清空</button>
+                <button id="debug-close-btn">关闭</button>
+            </div>
+        </div>
+        <div class="debug-panel-body" id="debug-panel-body"></div>
+    </div>
+    <button id="debug-toggle-btn" class="debug-toggle-btn" title="打开调试日志">🐛</button>
 </body>
 </html>

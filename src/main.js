@@ -41,7 +41,103 @@ class War3ModelViewerApp {
         this.init();
     }
 
+    // ===== 移动端调试日志系统 =====
+    initDebugSystem() {
+        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+                          || window.innerWidth < 768;
+
+        const panel = document.getElementById('debug-panel');
+        const panelBody = document.getElementById('debug-panel-body');
+        const toggleBtn = document.getElementById('debug-toggle-btn');
+        const closeBtn = document.getElementById('debug-close-btn');
+        const clearBtn = document.getElementById('debug-clear-btn');
+        const header = document.getElementById('debug-panel-header');
+
+        const appendLog = (level, args) => {
+            if (!panelBody) return;
+            const time = new Date().toLocaleTimeString();
+            const msg = args.map(a => {
+                if (typeof a === 'object') {
+                    try { return JSON.stringify(a).slice(0, 300); }
+                    catch (e) { return String(a).slice(0, 300); }
+                }
+                return String(a).slice(0, 300);
+            }).join(' ');
+            const div = document.createElement('div');
+            div.className = `debug-log-entry ${level}`;
+            div.innerHTML = `<span class="time">[${time}]</span>${escapeHtml(level.toUpperCase())}: ${escapeHtml(msg)}`;
+            panelBody.appendChild(div);
+            panelBody.scrollTop = panelBody.scrollHeight;
+            // 限制日志数量
+            while (panelBody.children.length > 200) {
+                panelBody.removeChild(panelBody.firstChild);
+            }
+        };
+
+        function escapeHtml(str) {
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
+        // 劫持 console 方法
+        const origError = console.error.bind(console);
+        const origWarn = console.warn.bind(console);
+        const origLog = console.log.bind(console);
+        const origInfo = console.info.bind(console);
+
+        console.error = (...args) => { origError(...args); appendLog('error', args); };
+        console.warn = (...args) => { origWarn(...args); appendLog('warn', args); };
+        console.log = (...args) => { origLog(...args); appendLog('info', args); };
+        console.info = (...args) => { origInfo(...args); appendLog('info', args); };
+
+        // 捕获未处理错误
+        window.addEventListener('error', (e) => {
+            appendLog('error', [`${e.message} (${e.filename}:${e.lineno})`]);
+        });
+        window.addEventListener('unhandledrejection', (e) => {
+            appendLog('error', ['Unhandled Promise:', e.reason]);
+        });
+
+        // 绑定按钮事件
+        if (closeBtn) {
+            closeBtn.addEventListener('click', () => {
+                panel.classList.remove('visible');
+                toggleBtn.classList.add('visible');
+            });
+        }
+        if (clearBtn) {
+            clearBtn.addEventListener('click', () => {
+                panelBody.innerHTML = '';
+            });
+        }
+        if (header) {
+            header.addEventListener('click', (e) => {
+                if (e.target.tagName !== 'BUTTON') {
+                    panel.classList.remove('visible');
+                    toggleBtn.classList.add('visible');
+                }
+            });
+        }
+        if (toggleBtn) {
+            toggleBtn.addEventListener('click', () => {
+                panel.classList.add('visible');
+                toggleBtn.classList.remove('visible');
+            });
+        }
+
+        // 移动端自动显示调试面板
+        if (isMobile) {
+            toggleBtn.classList.add('visible');
+        }
+
+        appendLog('info', ['调试系统已启动', '移动端: ' + isMobile, '屏幕尺寸: ' + window.innerWidth + 'x' + window.innerHeight]);
+    }
+
     async init() {
+        // 初始化调试系统（尽早启动以捕获所有错误）
+        this.initDebugSystem();
+
         // 初始化皮肤（在渲染之前）
         this.initTheme();
 
@@ -49,10 +145,11 @@ class War3ModelViewerApp {
         this.resizeCanvas();
 
         try {
-            this.viewer = new ModelViewer(canvas, { alpha: false, antialias: true });
+            this.viewer = new ModelViewer(canvas, { alpha: false, antialias: true, preserveDrawingBuffer: false, powerPreference: 'default' });
+            console.log('[Init] WebGL Viewer 创建成功');
         } catch (e) {
+            console.error('WebGL 初始化失败:', e);
             alert('WebGL 不可用，请使用支持 WebGL 的浏览器。错误: ' + e.message);
-            console.error(e);
             return;
         }
 
@@ -618,6 +715,7 @@ class War3ModelViewerApp {
     async loadModel(modelPath, modelName) {
         this.showLoading(true);
         document.getElementById('model-info').textContent = '正在加载: ' + modelName;
+        console.log('[ModelLoader] 开始加载模型:', modelPath);
 
         if (this.currentInstance) {
             this.scene.removeInstance(this.currentInstance);
@@ -644,19 +742,23 @@ class War3ModelViewerApp {
             // 自定义模型目录文件清单缓存：key=目录 URL, value=Set<小写文件名>
             const customDirListingCache = new Map();
 
-            // 异步探测 URL 是否存在
-            const probeUrl = async (url) => {
+            // 异步探测 URL 是否存在（带超时）
+            const probeUrl = async (url, timeoutMs = 5000) => {
                 if (customTextureCaseCache.has(url)) {
                     return customTextureCaseCache.get(url);
                 }
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
                 try {
-                    const response = await fetch(url, { method: 'HEAD' });
+                    const response = await fetch(url, { method: 'HEAD', signal: controller.signal, cache: 'no-store' });
                     if (response.ok) {
                         customTextureCaseCache.set(url, url);
                         return url;
                     }
                 } catch (e) {
-                    // 网络错误，按不存在处理
+                    // 网络错误或超时
+                } finally {
+                    clearTimeout(timeoutId);
                 }
                 customTextureCaseCache.set(url, null);
                 return null;
@@ -795,8 +897,16 @@ class War3ModelViewerApp {
 
         } catch (error) {
             console.error('加载模型失败:', error);
-            document.getElementById('model-info').textContent = '加载失败: ' + error.message;
-            alert('加载模型失败: ' + error.message);
+            const errMsg = error && error.message ? error.message : String(error);
+            document.getElementById('model-info').textContent = '加载失败: ' + errMsg;
+            // 移动端：显示更详细的错误信息
+            const details = [
+                '错误: ' + errMsg,
+                '模型路径: ' + modelPath,
+                '状态: ' + (this.viewer && this.viewer.scene ? '已初始化' : '未初始化'),
+            ].join('\n');
+            console.error('详细错误信息:\n' + details);
+            alert('加载模型失败:\n' + errMsg + '\n\n详细信息请打开调试面板 (右下角🐛按钮)');
         }
 
         this.showLoading(false);
@@ -1320,8 +1430,13 @@ class War3ModelViewerApp {
     resizeCanvas() {
         const canvas = document.getElementById('canvas');
         const rect = canvas.parentElement.getBoundingClientRect();
-        canvas.width = Math.floor(rect.width);
-        canvas.height = Math.floor(rect.height);
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        const width = Math.max(1, Math.floor(rect.width));
+        const height = Math.max(1, Math.floor(rect.height));
+        canvas.width = Math.floor(width * dpr);
+        canvas.height = Math.floor(height * dpr);
+        canvas.style.width = width + 'px';
+        canvas.style.height = height + 'px';
     }
 
     onResize() {
