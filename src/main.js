@@ -163,12 +163,33 @@ class War3ModelViewerApp {
         this.updateSceneColor();
 
         this.viewer.on('error', (error) => {
-            console.warn('Viewer error:', error);
+            console.error('Viewer error:', error);
         });
 
-        this.viewer.addHandler(handlers.mdx, (path) => {
-            return this.resolveAssetPath(path);
-        });
+        // 检测 WebGL 扩展支持（MDX handler 需要）
+        const gl = this.viewer.gl;
+        const extFloat = gl.getExtension('OES_texture_float');
+        const extInstanced = gl.getExtension('ANGLE_instanced_arrays');
+        console.log('[Init] WebGL 扩展检测: OES_texture_float=' + !!extFloat + ', ANGLE_instanced_arrays=' + !!extInstanced);
+        if (!extFloat || !extInstanced) {
+            const missing = [];
+            if (!extFloat) missing.push('OES_texture_float');
+            if (!extInstanced) missing.push('ANGLE_instanced_arrays');
+            console.error('[Init] 缺少必要的 WebGL 扩展: ' + missing.join(', '));
+        }
+
+        let mdxHandlerOk = false;
+        try {
+            mdxHandlerOk = this.viewer.addHandler(handlers.mdx, (path) => {
+                return this.resolveAssetPath(path);
+            });
+            console.log('[Init] MDX handler 注册结果: ' + mdxHandlerOk);
+            if (!mdxHandlerOk) {
+                console.error('[Init] MDX handler 注册失败！模型将无法加载。');
+            }
+        } catch (e) {
+            console.error('[Init] MDX handler 注册异常:', e);
+        }
         this.viewer.addHandler(handlers.blp);
         this.viewer.addHandler(handlers.tga);
         this.viewer.addHandler(handlers.dds);
@@ -717,6 +738,18 @@ class War3ModelViewerApp {
         document.getElementById('model-info').textContent = '正在加载: ' + modelName;
         console.log('[ModelLoader] 开始加载模型:', modelPath);
 
+        // 预检：测试模型文件是否可访问
+        try {
+            const probeResp = await fetch(modelPath, { method: 'HEAD' });
+            console.log('[ModelLoader] 预检 HEAD ' + modelPath + ' -> ' + probeResp.status + ' ' + probeResp.statusText);
+            if (!probeResp.ok) {
+                throw new Error('模型文件不可访问 (HTTP ' + probeResp.status + '): ' + modelPath);
+            }
+        } catch (probeErr) {
+            console.error('[ModelLoader] 预检失败:', probeErr);
+            throw new Error('无法访问模型文件: ' + (probeErr.message || probeErr));
+        }
+
         if (this.currentInstance) {
             this.scene.removeInstance(this.currentInstance);
             this.currentInstance = null;
@@ -850,10 +883,12 @@ class War3ModelViewerApp {
                 return resolveCustomTexture(fileName);
             };
 
+            console.log('[ModelLoader] 调用 viewer.load, pathSolver 已就绪');
             const model = await this.viewer.load(modelPath, pathSolver);
+            console.log('[ModelLoader] viewer.load 返回:', model ? '成功' : 'null/undefined');
 
             if (!model) {
-                throw new Error('无法加载模型');
+                throw new Error('无法加载模型 (viewer.load 返回空值，可能是 WebGL 扩展不支持或文件获取失败)');
             }
 
             this.currentModel = model;
@@ -899,14 +934,25 @@ class War3ModelViewerApp {
             console.error('加载模型失败:', error);
             const errMsg = error && error.message ? error.message : String(error);
             document.getElementById('model-info').textContent = '加载失败: ' + errMsg;
-            // 移动端：显示更详细的错误信息
+            // 检查 WebGL 扩展和 handler 状态
+            const gl = this.viewer && this.viewer.gl;
+            const hasFloat = gl && !!gl.getExtension('OES_texture_float');
+            const hasInstanced = gl && !!gl.getExtension('ANGLE_instanced_arrays');
             const details = [
                 '错误: ' + errMsg,
                 '模型路径: ' + modelPath,
-                '状态: ' + (this.viewer && this.viewer.scene ? '已初始化' : '未初始化'),
+                'Viewer: ' + (this.viewer ? '已创建' : '未创建'),
+                'Scene: ' + (this.scene ? '已初始化' : '未初始化'),
+                'WebGL扩展: OES_texture_float=' + hasFloat + ', ANGLE_instanced_arrays=' + hasInstanced,
             ].join('\n');
             console.error('详细错误信息:\n' + details);
-            alert('加载模型失败:\n' + errMsg + '\n\n详细信息请打开调试面板 (右下角🐛按钮)');
+            if (!hasFloat || !hasInstanced) {
+                alert('加载模型失败:\n您的浏览器不支持必要的 WebGL 扩展\n\n缺少: ' +
+                    [!hasFloat ? 'OES_texture_float' : '', !hasInstanced ? 'ANGLE_instanced_arrays' : ''].filter(x => x).join(', ') +
+                    '\n\n请尝试使用支持 WebGL 2.0 的浏览器（如 Chrome）');
+            } else {
+                alert('加载模型失败:\n' + errMsg + '\n\n详细信息请打开调试面板 (右下角🐛按钮)');
+            }
         }
 
         this.showLoading(false);
