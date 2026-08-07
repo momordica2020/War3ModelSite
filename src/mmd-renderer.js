@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import {
     ThreeMmdLoader,
     initCoreWithFallback,
+    FallbackCore,
     disposeMmdModel,
 } from '@yohawing/three-mmd-loader';
 // Webpack 以 asset 方式打包 WASM，加载器用它做 PMX/PMD 快速解析；
@@ -9,6 +10,17 @@ import {
 import mmdWasmUrl from '@yohawing/three-mmd-loader/dist/parser/wasm/generated/mmd_anim_wasm_bg.wasm';
 
 const MMD_FRAME_RATE = 30;
+
+/**
+ * WASM 核心初始化加超时保护：移动/弱网下若 wasm 文件 fetch 卡住，
+ * 超时后自动回退到纯 TS 解析器，避免加载永远卡在“加载中”。
+ */
+function initMmdCoreWithTimeout(wasmUrl, timeoutMs = 8000) {
+    return Promise.race([
+        initCoreWithFallback({ wasmUrl }),
+        new Promise((resolve) => setTimeout(() => resolve(null), timeoutMs)),
+    ]).then((core) => core || new FallbackCore());
+}
 
 /**
  * MMD 渲染通道：基于 three.js + @yohawing/three-mmd-loader。
@@ -40,7 +52,7 @@ export default class MmdRenderer {
 
         // 使用回退安全的解析核心（WASM 优先，失败自动降级为 TS 解析）
         this.loader = new ThreeMmdLoader({
-            core: initCoreWithFallback({ wasmUrl: mmdWasmUrl }),
+            core: initMmdCoreWithTimeout(mmdWasmUrl),
             // 启用内置弹簧物理：头发/裙子等带刚体的部位会随动作摆动，不再穿模
             runtime: { physics: 'stateful-spring' },
         });

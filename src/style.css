@@ -626,6 +626,36 @@ body.mmd-mode .mdx-only {
     display: none;
 }
 
+/* 错误提示条 */
+.error-banner {
+    position: fixed;
+    top: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 10000;
+    max-width: 90vw;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: rgba(180, 40, 60, 0.95);
+    color: #fff;
+    padding: 10px 14px;
+    border-radius: 6px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+    font-size: 13px;
+    line-height: 1.4;
+}
+
+.error-banner-close {
+    background: none;
+    border: none;
+    color: #fff;
+    font-size: 16px;
+    cursor: pointer;
+    padding: 0 2px;
+    flex-shrink: 0;
+}
+
 .loading-spinner {
     width: 50px;
     height: 50px;

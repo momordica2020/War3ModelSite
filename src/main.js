@@ -1297,6 +1297,36 @@ class War3ModelViewerApp {
         }
     }
 
+    /**
+     * 显示可关闭的错误提示条（加载失败等）。
+     */
+    showError(title, modelPath, detail) {
+        let banner = document.getElementById('error-banner');
+        if (!banner) {
+            banner = document.createElement('div');
+            banner.id = 'error-banner';
+            banner.className = 'error-banner';
+            const close = document.createElement('button');
+            close.className = 'error-banner-close';
+            close.textContent = '×';
+            close.addEventListener('click', () => banner.remove());
+            banner.appendChild(close);
+            document.body.appendChild(banner);
+        }
+        const msg = String(detail || '');
+        banner.innerHTML = '';
+        const close = document.createElement('button');
+        close.className = 'error-banner-close';
+        close.textContent = '×';
+        close.addEventListener('click', () => banner.remove());
+        const text = document.createElement('span');
+        text.textContent = (title || '加载失败') + (msg ? '：' + msg : '');
+        banner.appendChild(text);
+        banner.appendChild(close);
+        banner.classList.add('visible');
+        console.error('[ErrorBanner]', title, modelPath, detail);
+    }
+
     // ===== 模型加载 =====
     async loadModel(modelPath, modelName) {
         // 已加载同一模型：跳过，避免重复下载/解析
@@ -1577,6 +1607,18 @@ class War3ModelViewerApp {
         return /\.vmd$/i.test(name);
     }
 
+    /**
+     * 检测当前环境是否支持 WebGL2（MMD 渲染通道的硬性要求）。
+     */
+    supportsWebGL2() {
+        try {
+            const canvas = document.createElement('canvas');
+            return !!canvas.getContext('webgl2');
+        } catch (e) {
+            return false;
+        }
+    }
+
     rgbToHex(rgb) {
         return '#' + rgb.map(v => Math.round(v * 255).toString(16).padStart(2, '0')).join('');
     }
@@ -1624,6 +1666,15 @@ class War3ModelViewerApp {
         this.showLoading(true);
         document.getElementById('model-info').textContent = '正在加载: ' + modelName;
         console.log('[MMD] 开始加载 MMD 模型:', modelPath, 'token=' + myToken);
+
+        // 前置检查：MMD 渲染通道依赖 WebGL2（three.js r163+ 已移除 WebGL1 支持）
+        if (!this.supportsWebGL2()) {
+            this.showLoading(false);
+            document.getElementById('model-info').textContent = 'MMD 模型需要 WebGL2';
+            this.showError('无法加载 MMD 模型', modelPath, '当前浏览器/微信不支持 WebGL2，无法渲染 MMD 模型，请升级浏览器或微信内核');
+            console.warn('[MMD] 当前环境不支持 WebGL2，跳过 MMD 渲染');
+            return;
+        }
 
         // 移除当前 MDX 实例
         if (this.currentInstance) {
@@ -1703,14 +1754,16 @@ class War3ModelViewerApp {
             const displayName = this.getTranslation(modelName);
             document.getElementById('model-info').textContent = displayName + ' | MMD 模型';
 
-            // 加载内置动作（失败不阻塞模型显示）
-            await this.loadBuiltinMmdMotions(myToken);
             // 渲染就绪后再应用相机，避免首帧黑屏
             renderer.ready = true;
             this.applyCameraState();
             this._currentModelPath = modelPath;
-            this.updateMmdAnimationList();
+            // 模型已就绪立即显示，内置动作在后台加载（慢速网络不用等全部 VMD）
             this.showLoading(false);
+
+            // 加载内置动作（失败不阻塞模型显示）
+            await this.loadBuiltinMmdMotions(myToken);
+            this.updateMmdAnimationList();
         } catch (error) {
             if (myToken !== this._loadToken) return;
             if (this.mmdRenderer) this.mmdRenderer.ready = true;
