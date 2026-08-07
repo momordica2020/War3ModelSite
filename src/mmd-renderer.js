@@ -41,10 +41,8 @@ export default class MmdRenderer {
         // 使用回退安全的解析核心（WASM 优先，失败自动降级为 TS 解析）
         this.loader = new ThreeMmdLoader({
             core: initCoreWithFallback({ wasmUrl: mmdWasmUrl }),
-            // 按每个材质实际用到的 UV 区域扫描贴图透明度：
-            // other.png 这类“图集”整张不透明，但表情/脸线等材质只用到透明黑条带，
-            // 几何感知扫描能正确把它们识别为 alphaTest，避免渲染出黑色条带。
-            geometryAwareAlpha: true,
+            // 启用内置弹簧物理：头发/裙子等带刚体的部位会随动作摆动，不再穿模
+            runtime: { physics: 'stateful-spring' },
         });
 
         this.model = null;        // ThreeMmdModel
@@ -57,6 +55,7 @@ export default class MmdRenderer {
         this.speed = 1;
         this.ready = false;
         this.fit = null;          // 自动取景结果 { distance, target }
+        this._loadToken = 0;      // 渲染器级加载令牌：防止并发加载旧模型残留
 
         // 首次 show 时按需设置尺寸
         this._sized = false;
@@ -98,6 +97,7 @@ export default class MmdRenderer {
      * 加载 PMD/PMX 模型。source 可为 URL、File、ArrayBuffer 或 Uint8Array。
      */
     async loadModel(source) {
+        const myLoadToken = ++this._loadToken;
         this.disposeModel();
         this.motion = null;
         this.motionName = '';
@@ -110,10 +110,58 @@ export default class MmdRenderer {
             outline: false,
             materialRenderOrder: false,
         });
+        if (myLoadToken !== this._loadToken) {
+            // 期间用户切换了其他模型：丢弃本次结果，避免旧模型叠加在场景里
+            try {
+                disposeMmdModel(model);
+            } catch (e) {
+                console.warn('[MMD] 释放过期加载的模型失败:', e);
+            }
+            return null;
+        }
         this.simplifyMaterials(model);
         this.model = model;
         this.scene.add(model.root);
         this.fit = this.frameModel();
+        return model;
+    }
+
+    /**
+     * 挂载一个已加载好的模型（来自缓存），不重复加载。
+     * 调用前应确保当前场景没有已挂载模型（main.js 会先 detachModel）。
+     */
+    attachModel(model, fit) {
+        // 使任何仍在进行的 loadModel 失效（防止旧模型加载完成后叠加进场景）
+        this._loadToken++;
+        if (this.model && this.model !== model) {
+            this.scene.remove(this.model.root);
+        }
+        this.model = model;
+        this.scene.add(model.root);
+        this.motion = null;
+        this.motionName = '';
+        this.motionDuration = 0;
+        this.time = 0;
+        this.paused = true;
+        this.fit = fit || this.frameModel();
+        return this.fit;
+    }
+
+    /**
+     * 从场景移除当前模型但不释放资源，返回模型对象供外部缓存复用。
+     */
+    detachModel() {
+        this._loadToken++;
+        const model = this.model;
+        if (model) {
+            this.scene.remove(model.root);
+        }
+        this.model = null;
+        this.motion = null;
+        this.motionName = '';
+        this.motionDuration = 0;
+        this.time = 0;
+        this.paused = true;
         return model;
     }
 
@@ -142,6 +190,12 @@ export default class MmdRenderer {
             // 否则"表情/脸线"这类叠加材质（在 other.png 上是透明黑条带）会以不透明黑色渲染出来。
             if (orig.map && !(m.alphaTest > 0)) {
                 m.alphaTest = 0.5 / 255;
+            }
+            // 叠加类材质（表情/脸线等）在静止时应完全透明：
+            // 它们采样贴图上的透明黑条带，半透明边缘若按不透明渲染会残留黑点。
+            // 用 alpha 混合（而不是 alphaTest 丢弃）让这些条带完全不可见。
+            if (orig.map && /表情|脸线|face.?line|expression|overlay/i.test(orig.name || '')) {
+                m.transparent = true;
             }
             return m;
         });
@@ -178,6 +232,8 @@ export default class MmdRenderer {
             this.model.runtime.clearAnimation();
             // 恢复模型的默认人形姿势（重置骨骼到静止姿态）
             this.model.runtime.resetPose();
+            // 重置物理状态，避免头发/裙子残留摆动
+            this.model.runtime.resetPhysicsState();
             this.model.update(0);
         }
     }
@@ -281,6 +337,18 @@ export default class MmdRenderer {
                 console.warn('[MMD] 释放模型资源失败:', e);
             }
             this.model = null;
+        }
+    }
+
+    /**
+     * 释放一个不在场景中的模型对象（缓存淘汰时使用）。
+     */
+    disposeModelRef(model) {
+        if (!model) return;
+        try {
+            disposeMmdModel(model);
+        } catch (e) {
+            console.warn('[MMD] 释放缓存模型失败:', e);
         }
     }
 

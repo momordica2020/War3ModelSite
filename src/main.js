@@ -139,6 +139,8 @@ class War3ModelViewerApp {
 
         // 模型加载令牌：防止快速切换时旧模型加载完覆盖新模型
         this._loadToken = 0;
+        this._currentModelPath = null;   // 当前已加载/显示的模型路径（用于同模型点击跳过）
+        this.mmdModelCache = new Map();  // 已加载的 MMD 模型缓存（仅存已卸载的模型，最多 2 个）
 
         // 模型源数据（用于解析面数据）
         this.modelSource = null;
@@ -1297,6 +1299,12 @@ class War3ModelViewerApp {
 
     // ===== 模型加载 =====
     async loadModel(modelPath, modelName) {
+        // 已加载同一模型：跳过，避免重复下载/解析
+        if (this._currentModelPath === modelPath) {
+            console.log('[ModelLoader] 已加载同一模型，跳过:', modelPath);
+            return;
+        }
+
         // MMD 模型（.pmd/.pmx）走独立渲染通道
         if (this.isMmdFile(modelPath)) {
             this.loadMmdModel(modelPath, modelName);
@@ -1305,6 +1313,18 @@ class War3ModelViewerApp {
 
         // 递增加载令牌，旧的加载请求完成后会被丢弃
         const myToken = ++this._loadToken;
+        // 切回 MDX 时把当前 MMD 模型移入缓存，便于快速切回
+        if (this.mmdRenderer && this.mmdRenderer.model) {
+            const mmdModel = this.mmdRenderer.detachModel();
+            if (mmdModel && this._currentModelPath) {
+                this.mmdModelCache.set(this._currentModelPath, {
+                    model: mmdModel,
+                    fit: this.mmdFit,
+                    motions: this.mmdMotions,
+                });
+                this.trimMmdModelCache();
+            }
+        }
         // 加载 MDX 模型时切回 MDX 渲染通道
         this.setMmdMode(false);
 
@@ -1525,6 +1545,7 @@ class War3ModelViewerApp {
             const displayName = this.getTranslation(modelName);
             document.getElementById('model-info').textContent =
                 displayName + ' | ' + model.sequences.length + ' 个动作';
+            this._currentModelPath = modelPath;
 
             if (model.sequences.length > 0) {
                 this.selectAnimation(this.findDefaultAnimation(model));
@@ -1618,17 +1639,57 @@ class War3ModelViewerApp {
         if (wire) wire.checked = false;
 
         this.modelSource = modelPath;
-        this.mmdMotions = [];
-        this.mmdCurrentMotion = -1;
 
         try {
             const renderer = this.ensureMmdRenderer();
             if (myToken !== this._loadToken) return;
             renderer.show();
             this.setMmdMode(true);
+            // 加载完成前暂停渲染，避免与模型解析/动作加载抢占主线程
+            renderer.ready = false;
 
-            await renderer.loadModel(modelPath);
-            if (myToken !== this._loadToken) return;
+            // 先把当前显示的 MMD 模型移入缓存（不释放资源），便于快速切回
+            if (this.mmdRenderer.model) {
+                const currentModel = renderer.detachModel();
+                if (currentModel && this._currentModelPath) {
+                    this.mmdModelCache.set(this._currentModelPath, {
+                        model: currentModel,
+                        fit: this.mmdFit,
+                        motions: this.mmdMotions,
+                    });
+                    this.trimMmdModelCache();
+                }
+            }
+
+            // 缓存命中：直接挂载已解析的模型，不再下载/解析/扫描
+            const cached = this.mmdModelCache.get(modelPath);
+            if (cached) {
+                console.log('[MMD] 命中模型缓存:', modelPath);
+                this.mmdModelCache.delete(modelPath);
+                const fit = renderer.attachModel(cached.model, cached.fit);
+                this.mmdFit = fit;
+                this.cameraDistance = fit.distance;
+                this.cameraAngleX = 0;
+                this.cameraAngleY = 0.3;
+                this.cameraTarget = [...fit.target];
+                this.mmdMotions = cached.motions || [];
+                this.mmdCurrentMotion = -1;
+                this._currentModelPath = modelPath;
+                const displayName = this.getTranslation(modelName);
+                document.getElementById('model-info').textContent = displayName + ' | MMD 模型';
+                // 渲染就绪后再应用相机，避免首帧黑屏
+                renderer.ready = true;
+                this.applyCameraState();
+                this.updateMmdAnimationList();
+                this.showLoading(false);
+                return;
+            }
+
+            this.mmdMotions = [];
+            this.mmdCurrentMotion = -1;
+
+            const loaded = await renderer.loadModel(modelPath);
+            if (myToken !== this._loadToken || !loaded) return;
 
             // 应用自动取景（模型包围盒）
             if (renderer.fit) {
@@ -1638,17 +1699,21 @@ class War3ModelViewerApp {
                 this.cameraAngleY = 0.3;
                 this.cameraTarget = [...renderer.fit.target];
             }
-            this.applyCameraState();
 
             const displayName = this.getTranslation(modelName);
             document.getElementById('model-info').textContent = displayName + ' | MMD 模型';
 
             // 加载内置动作（失败不阻塞模型显示）
-            await this.loadBuiltinMmdMotions();
+            await this.loadBuiltinMmdMotions(myToken);
+            // 渲染就绪后再应用相机，避免首帧黑屏
+            renderer.ready = true;
+            this.applyCameraState();
+            this._currentModelPath = modelPath;
             this.updateMmdAnimationList();
             this.showLoading(false);
         } catch (error) {
             if (myToken !== this._loadToken) return;
+            if (this.mmdRenderer) this.mmdRenderer.ready = true;
             console.error('加载 MMD 模型失败:', error);
             const errMsg = error && error.message ? error.message : String(error);
             document.getElementById('model-info').textContent = '加载失败: ' + errMsg;
@@ -1661,8 +1726,9 @@ class War3ModelViewerApp {
      * 加载 ModelMMD/Motions/ 下的内置 VMD 动作并加入播放列表。
      * 保留顺序；单个失败仅告警跳过。
      */
-    async loadBuiltinMmdMotions() {
+    async loadBuiltinMmdMotions(token) {
         if (!this.mmdRenderer) return;
+        if (token !== undefined && token !== this._loadToken) return;
         // 列表第一项：恢复到无 VMD 的默认人形姿势
         this.mmdMotions.push({
             name: '默认姿势（无动作）',
@@ -1671,8 +1737,10 @@ class War3ModelViewerApp {
         });
         for (const item of MMD_BUILTIN_MOTIONS) {
             try {
+                if (token !== this._loadToken) return;
                 const url = MMD_MOTIONS_BASE + item.file;
                 const animation = await this.mmdRenderer.loadMotion(url + '?v=' + MMD_MOTIONS_VERSION);
+                if (token !== this._loadToken) return;
                 this.mmdMotions.push({
                     name: item.name,
                     animation,
@@ -1682,6 +1750,20 @@ class War3ModelViewerApp {
                 console.log('[MMD] 内置动作已加载:', item.name, '(' + item.file + ')');
             } catch (e) {
                 console.warn('[MMD] 内置动作加载失败:', item.file, e);
+            }
+        }
+    }
+
+    /**
+     * 限制 MMD 模型缓存数量，超出时释放最旧的模型（节省 GPU 内存）。
+     */
+    trimMmdModelCache() {
+        while (this.mmdModelCache.size > 2) {
+            const oldestKey = this.mmdModelCache.keys().next().value;
+            const entry = this.mmdModelCache.get(oldestKey);
+            this.mmdModelCache.delete(oldestKey);
+            if (entry && entry.model && this.mmdRenderer) {
+                this.mmdRenderer.disposeModelRef(entry.model);
             }
         }
     }
