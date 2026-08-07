@@ -429,6 +429,24 @@ body[data-theme="light"] .animation-item-duration {
     background: rgba(0, 0, 0, 0.08);
 }
 
+.animation-item-badge {
+    color: var(--accent);
+    font-size: 10px;
+    margin-left: 8px;
+    padding: 1px 5px;
+    border: 1px solid var(--accent);
+    border-radius: 3px;
+    opacity: 0.9;
+    flex-shrink: 0;
+}
+
+.animation-hint {
+    color: var(--text-muted);
+    font-size: 12px;
+    padding: 2px 2px 8px;
+    line-height: 1.5;
+}
+
 .animation-buttons {
     display: flex;
     gap: 5px;
@@ -530,6 +548,38 @@ body[data-theme="light"] .animation-item-duration {
     width: 100%;
     height: 100%;
     display: block;
+}
+
+/* ===== MMD 渲染通道（three.js） ===== */
+#mmd-canvas {
+    display: none;
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+}
+
+body.mmd-mode #mmd-canvas {
+    display: block;
+}
+
+body.mmd-mode #canvas {
+    display: none;
+}
+
+/* MMD 专属控件：仅 MMD 模式显示 */
+.mmd-only {
+    display: none !important;
+}
+
+body.mmd-mode .mmd-only {
+    display: inline-block !important;
+}
+
+/* MDX 专属控件（线框/队伍色）：MMD 模式下隐藏 */
+body.mmd-mode .mdx-only {
+    display: none !important;
 }
 
 /* 视角指示器 */

@@ -37,6 +37,7 @@
 
             <main class="viewer-container">
                 <canvas id="canvas"></canvas>
+                <canvas id="mmd-canvas"></canvas>
                 <div id="orientation-indicator" class="orientation-indicator">
                     <svg id="orientation-svg" width="100" height="100" viewBox="-50 -50 100 100">
                         <circle cx="0" cy="0" r="45" fill="rgba(0,0,0,0.4)" stroke="rgba(233,69,96,0.6)" stroke-width="1.5"/>
@@ -66,6 +67,7 @@
                     <div class="loading-spinner"></div>
                     <div class="loading-text">加载中...</div>
                 </div>
+                <input type="file" id="mmd-motion-input" accept=".vmd" multiple style="display:none">
             </main>
 
             <aside class="sidebar sidebar-right">
@@ -78,6 +80,8 @@
                 <div class="desktop-layout">
                 <div class="panel panel-anim">
                     <h2 class="panel-title">动作列表</h2>
+                    <button id="mmd-load-motion-btn" class="btn mmd-only" type="button">上传 VMD 动作</button>
+                    <div class="animation-hint mmd-only">内置常见动作已自动加载，点击即可播放</div>
                     <div id="animation-list" class="animation-list">
                         <div class="animation-empty">加载模型后显示动作</div>
                     </div>
@@ -107,7 +111,7 @@
                         </div>
                     </div>
                     <div class="display-options">
-                        <label>
+                        <label class="mdx-only">
                             <input type="checkbox" id="wireframe-checkbox">
                             线框模式
                         </label>
@@ -127,7 +131,7 @@
                                 </div>
                             </div>
                         </div>
-                        <label>
+                        <label class="mdx-only">
                             队伍颜色:
                             <select id="team-color-select">
                                 <option value="-1">中立（原色）</option>
@@ -167,6 +171,7 @@
                         <button class="btn mc-btn" id="play-btn-m">播放</button>
                         <button class="btn mc-btn" id="pause-btn-m">暂停</button>
                         <button class="btn mc-btn" id="stop-btn-m">停止</button>
+                        <button class="btn mc-btn mmd-only" id="mmd-load-motion-btn-m" type="button" title="上传 VMD 动作">VMD</button>
                         <label class="mc-check">
                             <input type="checkbox" id="loop-checkbox-m" checked>
                             <span>循环</span>
@@ -181,7 +186,7 @@
                     <div class="mc-row mc-row-4">
                         <button class="btn mc-btn" id="reset-camera-btn-m">重置</button>
                         <button class="btn mc-btn" id="auto-rotate-btn-m">自转</button>
-                        <label class="mc-check">
+                        <label class="mc-check mdx-only">
                             <input type="checkbox" id="wireframe-checkbox-m">
                             <span>线框</span>
                         </label>
@@ -192,7 +197,7 @@
                             <span>背景</span>
                             <input type="color" id="bg-color-input-m" value="#1a1a2e">
                         </label>
-                        <label class="mc-select">
+                        <label class="mc-select mdx-only">
                             <span>队伍</span>
                             <select id="team-color-select-m">
                                 <option value="-1">中立</option>

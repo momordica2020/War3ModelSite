@@ -4,14 +4,18 @@
   "description": "魔兽争霸3 3D模型网页查看器",
   "scripts": {
     "gen-index": "node scripts/generate-models-index.js",
+    "gen-motions": "node scripts/generate-builtin-vmds.js",
+    "merge-wave": "node scripts/merge-wave-leftarm.mjs",
     "dev": "node scripts/generate-models-index.js && webpack serve --mode=development",
     "build": "node scripts/generate-models-index.js && webpack --mode=production",
     "preview": "webpack serve --mode=production",
     "deploy": "npm run build && gh-pages -d dist"
   },
   "dependencies": {
+    "@yohawing/three-mmd-loader": "^0.8.1",
     "events": "^3.3.0",
-    "mdx-m3-viewer": "^5.12.0"
+    "mdx-m3-viewer": "^5.12.0",
+    "three": "^0.185.1"
   },
   "devDependencies": {
     "buffer": "^6.0.3",

@@ -18,10 +18,12 @@ Thumbs.db
 # 日志
 *.log
 npm-debug.log*
+.dev-server.log
 
 # 临时文件
 *.tmp
 *.bak
+.tmp-test*/
 
 # War3Assets 只保留模型和贴图文件（mdx/blp），其他排除
 War3Assets/**

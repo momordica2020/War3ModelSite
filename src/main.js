@@ -1,9 +1,26 @@
 const ModelViewerLib = require('mdx-m3-viewer');
 import './style.css';
+import MmdRenderer from './mmd-renderer.js';
 
 const ModelViewer = ModelViewerLib.viewer.ModelViewer;
 const handlers = ModelViewerLib.viewer.handlers;
 const MdlxModel = ModelViewerLib.parsers.mdlx.Model;
+
+/**
+ * MMD 内置动作目录（ModelMMD/Motions/，webpack 随 ModelMMD 一并拷贝）。
+ * 前 5 个由 scripts/generate-builtin-vmds.js 原创生成，wavefile_v2.vmd
+ * 来自 three.js 官方示例（社区动作，许可见 ModelMMD/Motions/README-wavefile.txt）。
+ */
+const MMD_MOTIONS_BASE = './ModelMMD/Motions/';
+// 内置动作内容版本号：VMD 重新生成后递增，避免浏览器缓存旧动作
+const MMD_MOTIONS_VERSION = 6;
+const MMD_BUILTIN_MOTIONS = [
+    { name: '待机-呼吸', file: 'idle_breath.vmd' },
+    { name: '走路（MMDAgent）', file: 'mmdagent_walk.vmd' },
+    { name: '挥手（MMDAgent）', file: 'mmdagent_wave.vmd' },
+    { name: '会釈-行礼（MMDAgent）', file: 'mmdagent_eshaku.vmd' },
+    { name: '舞蹈-WAVEFILE', file: 'wavefile_v2.vmd' },
+];
 
 /**
  * Monkey-patch: 让 mdx-m3-viewer 优先使用 WebGL 2.0 context
@@ -126,6 +143,13 @@ class War3ModelViewerApp {
         // 模型源数据（用于解析面数据）
         this.modelSource = null;
         this.modelParser = null;
+
+        // ===== MMD 通道状态 =====
+        this.mmdMode = false;
+        this.mmdRenderer = null;
+        this.mmdMotions = [];       // { name, animation }
+        this.mmdCurrentMotion = -1;
+        this.mmdFit = null;         // 当前 MMD 模型的自动取景结果
 
         // 皮肤背景色
         this.themeColors = {
@@ -360,12 +384,14 @@ class War3ModelViewerApp {
             const rgb = this.hexToRgb(this.customBgColor);
             this.scene.color = [rgb.r / 255, rgb.g / 255, rgb.b / 255];
             this.viewer.gl.clearColor(rgb.r / 255, rgb.g / 255, rgb.b / 255, 1);
+            if (this.mmdRenderer) this.mmdRenderer.setBackground(this.customBgColor);
             return;
         }
         const theme = document.body.getAttribute('data-theme');
         const color = this.themeColors[theme] || this.themeColors.dark;
         this.scene.color = [color[0], color[1], color[2]];
         this.viewer.gl.clearColor(color[0], color[1], color[2], 1);
+        if (this.mmdRenderer) this.mmdRenderer.setBackground(this.rgbToHex(color));
     }
 
     setBackgroundColor(hex) {
@@ -373,6 +399,7 @@ class War3ModelViewerApp {
         const rgb = this.hexToRgb(hex);
         this.scene.color = [rgb.r / 255, rgb.g / 255, rgb.b / 255];
         this.viewer.gl.clearColor(rgb.r / 255, rgb.g / 255, rgb.b / 255, 1);
+        if (this.mmdRenderer) this.mmdRenderer.setBackground(hex);
         localStorage.setItem('war3-bg-color', hex);
     }
 
@@ -541,6 +568,13 @@ class War3ModelViewerApp {
         }
 
         document.getElementById('play-btn').addEventListener('click', () => {
+            if (this.mmdMode && this.mmdRenderer) {
+                this.mmdRenderer.setPaused(false);
+                this.isPaused = false;
+                const speed = parseFloat(document.getElementById('speed-slider').value);
+                this.mmdRenderer.setSpeed(speed);
+                return;
+            }
             if (this.currentInstance) {
                 this.isPaused = false;
                 const speed = parseFloat(document.getElementById('speed-slider').value);
@@ -549,6 +583,11 @@ class War3ModelViewerApp {
         });
 
         document.getElementById('pause-btn').addEventListener('click', () => {
+            if (this.mmdMode && this.mmdRenderer) {
+                this.mmdRenderer.setPaused(true);
+                this.isPaused = true;
+                return;
+            }
             if (this.currentInstance) {
                 this.isPaused = true;
                 this.currentInstance.timeScale = 0;
@@ -556,6 +595,13 @@ class War3ModelViewerApp {
         });
 
         document.getElementById('stop-btn').addEventListener('click', () => {
+            if (this.mmdMode && this.mmdRenderer) {
+                this.mmdRenderer.stop();
+                this.isPaused = false;
+                this.mmdCurrentMotion = -1;
+                this.updateMmdAnimationList();
+                return;
+            }
             if (this.currentInstance) {
                 this.currentInstance.setSequence(-1);
                 this.isPaused = false;
@@ -564,6 +610,9 @@ class War3ModelViewerApp {
         });
 
         document.getElementById('loop-checkbox').addEventListener('change', (e) => {
+            if (this.mmdMode && this.mmdRenderer) {
+                this.mmdRenderer.setLoop(e.target.checked);
+            }
             if (this.currentInstance) {
                 this.currentInstance.setSequenceLoopMode(e.target.checked ? 2 : 0);
             }
@@ -573,6 +622,10 @@ class War3ModelViewerApp {
         speedSlider.addEventListener('input', (e) => {
             const speed = parseFloat(e.target.value);
             document.getElementById('speed-value').textContent = speed.toFixed(2) + 'x';
+            if (this.mmdMode && this.mmdRenderer) {
+                this.mmdRenderer.setSpeed(speed);
+                return;
+            }
             if (this.currentInstance && !this.isPaused) {
                 this.currentInstance.timeScale = speed;
             }
@@ -614,6 +667,23 @@ class War3ModelViewerApp {
                 this.applyTeamColor(color);
             }
         });
+
+        // ===== MMD 动作上传 =====
+        const mmdMotionInput = document.getElementById('mmd-motion-input');
+        const mmdLoadMotionBtn = document.getElementById('mmd-load-motion-btn');
+        const mmdLoadMotionBtnM = document.getElementById('mmd-load-motion-btn-m');
+        if (mmdMotionInput) {
+            mmdMotionInput.addEventListener('change', (e) => {
+                this.loadMmdMotionFiles(e.target.files);
+                e.target.value = '';
+            });
+            if (mmdLoadMotionBtn) {
+                mmdLoadMotionBtn.addEventListener('click', () => mmdMotionInput.click());
+            }
+            if (mmdLoadMotionBtnM) {
+                mmdLoadMotionBtnM.addEventListener('click', () => mmdMotionInput.click());
+            }
+        }
 
         // ===== 移动端紧凑布局控件绑定 =====
         this.setupMobileControls();
@@ -657,7 +727,7 @@ class War3ModelViewerApp {
         if (mAnimList) {
             mAnimList.addEventListener('click', (e) => {
                 const item = e.target.closest('.animation-item');
-                if (item && this.currentInstance) {
+                if (item && (this.currentInstance || this.mmdMode)) {
                     const index = parseInt(item.dataset.index);
                     this.selectAnimation(index);
                     // 收起下拉
@@ -672,6 +742,13 @@ class War3ModelViewerApp {
 
         // 播放
         mPlay.addEventListener('click', () => {
+            if (this.mmdMode && this.mmdRenderer) {
+                this.mmdRenderer.setPaused(false);
+                this.isPaused = false;
+                const speed = parseFloat(mSpeed.value);
+                this.mmdRenderer.setSpeed(speed);
+                return;
+            }
             if (this.currentInstance) {
                 this.isPaused = false;
                 const speed = parseFloat(mSpeed.value);
@@ -686,6 +763,11 @@ class War3ModelViewerApp {
 
         // 暂停
         mPause.addEventListener('click', () => {
+            if (this.mmdMode && this.mmdRenderer) {
+                this.mmdRenderer.setPaused(true);
+                this.isPaused = true;
+                return;
+            }
             if (this.currentInstance) {
                 this.isPaused = true;
                 this.currentInstance.timeScale = 0;
@@ -694,6 +776,13 @@ class War3ModelViewerApp {
 
         // 停止
         mStop.addEventListener('click', () => {
+            if (this.mmdMode && this.mmdRenderer) {
+                this.mmdRenderer.stop();
+                this.isPaused = false;
+                this.mmdCurrentMotion = -1;
+                this.updateMmdAnimationList();
+                return;
+            }
             if (this.currentInstance) {
                 this.currentInstance.setSequence(-1);
                 this.isPaused = false;
@@ -708,6 +797,9 @@ class War3ModelViewerApp {
         // 循环
         if (mLoop) {
             mLoop.addEventListener('change', (e) => {
+                if (this.mmdMode && this.mmdRenderer) {
+                    this.mmdRenderer.setLoop(e.target.checked);
+                }
                 if (this.currentInstance) {
                     this.currentInstance.setSequenceLoopMode(e.target.checked ? 2 : 0);
                 }
@@ -722,6 +814,10 @@ class War3ModelViewerApp {
             mSpeed.addEventListener('input', (e) => {
                 const speed = parseFloat(e.target.value);
                 if (mSpeedVal) mSpeedVal.textContent = speed.toFixed(2) + 'x';
+                if (this.mmdMode && this.mmdRenderer) {
+                    this.mmdRenderer.setSpeed(speed);
+                    return;
+                }
                 if (this.currentInstance && !this.isPaused) {
                     this.currentInstance.timeScale = speed;
                 }
@@ -912,7 +1008,11 @@ class War3ModelViewerApp {
     }
 
     selectAnimation(index) {
-        if (!this.currentInstance) return;
+        if (!this.currentInstance && !this.mmdMode) return;
+        if (this.mmdMode) {
+            this.playMmdMotion(index);
+            return;
+        }
         this.currentInstance.setSequence(index);
         this.isPaused = false;
         const dSpeed = document.getElementById('speed-slider');
@@ -940,6 +1040,7 @@ class War3ModelViewerApp {
     // ===== 相机控制 =====
     setupCameraControls() {
         const canvas = document.getElementById('canvas');
+        const mmdCanvas = document.getElementById('mmd-canvas');
         let isDragging = false;
         let dragButton = 0;
         let lastX = 0;
@@ -948,153 +1049,184 @@ class War3ModelViewerApp {
         // 摄像机目标点（用于平移）
         this.cameraTarget = [0, 0, 0];
 
-        const updateCamera = () => {
-            const camera = this.scene.camera;
-            const tx = this.cameraTarget[0];
-            const ty = this.cameraTarget[1];
-            const tz = this.cameraTarget[2];
-            const x = Math.sin(this.cameraAngleX) * Math.cos(this.cameraAngleY) * this.cameraDistance;
-            const y = Math.sin(this.cameraAngleY) * this.cameraDistance;
-            const z = Math.cos(this.cameraAngleX) * Math.cos(this.cameraAngleY) * this.cameraDistance;
-            camera.setLocation([tx + x, ty + y, tz + z]);
-            camera.face([tx, ty, tz], [0, 1, 0]);
-            this.updateOrientationIndicator();
+        const bindCanvas = (el) => {
+            if (!el) return;
+
+            el.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+            });
+
+            el.addEventListener('mousedown', (e) => {
+                isDragging = true;
+                dragButton = e.button;
+                lastX = e.clientX;
+                lastY = e.clientY;
+                this.autoRotate = false;
+                document.getElementById('auto-rotate-btn').textContent = '自动旋转';
+                const mBtn = document.getElementById('auto-rotate-btn-m');
+                if (mBtn) mBtn.textContent = '自转';
+            });
+
+            el.addEventListener('mousemove', (e) => {
+                if (!isDragging) return;
+                const dx = e.clientX - lastX;
+                const dy = e.clientY - lastY;
+
+                if (dragButton === 0) {
+                    // 左键：旋转
+                    this.cameraAngleX -= dx * 0.01;
+                    this.cameraAngleY += dy * 0.01;
+                    this.cameraAngleY = Math.max(-Math.PI / 2 + 0.1, Math.min(Math.PI / 2 - 0.1, this.cameraAngleY));
+                } else if (dragButton === 2 || dragButton === 1) {
+                    // 右键/中键：平移（"抓取"模式 - 拖动方向 = 场景移动方向）
+                    const panSpeed = this.cameraDistance * 0.002;
+                    // 计算右方向和上方向在世界空间中的向量
+                    const ax = this.cameraAngleX;
+                    const ay = this.cameraAngleY;
+                    // 右方向（屏幕右 -> 世界X/Z平面）
+                    const rightX = Math.cos(ax);
+                    const rightZ = -Math.sin(ax);
+                    // 上方向（屏幕上 -> 世界Y + 部分X/Z）
+                    const upX = -Math.sin(ax) * Math.sin(ay);
+                    const upY = Math.cos(ay);
+                    const upZ = -Math.cos(ax) * Math.sin(ay);
+
+                    // 拖动右(dx>0) => 场景右移 => 摄像机左移 => 目标点 - right
+                    // 拖动下(dy>0) => 场景下移 => 摄像机上移 => 目标点 + up
+                    this.cameraTarget[0] -= rightX * dx * panSpeed;
+                    this.cameraTarget[2] -= rightZ * dx * panSpeed;
+                    this.cameraTarget[0] += upX * dy * panSpeed;
+                    this.cameraTarget[1] += upY * dy * panSpeed;
+                    this.cameraTarget[2] += upZ * dy * panSpeed;
+                }
+
+                lastX = e.clientX;
+                lastY = e.clientY;
+                this.applyCameraState();
+            });
+
+            el.addEventListener('mouseup', () => { isDragging = false; });
+            el.addEventListener('mouseleave', () => { isDragging = false; });
+
+            el.addEventListener('wheel', (e) => {
+                e.preventDefault();
+                if (this.mmdMode) {
+                    // MMD 模型尺寸远小于 War3 模型：按当前距离比例缩放（每格约 12%），
+                    // 自动适配不同模型的大小
+                    this.cameraDistance *= Math.pow(1.0012, e.deltaY);
+                } else {
+                    this.cameraDistance += e.deltaY * 0.5;
+                }
+                const minDist = this.mmdMode ? 3 : 50;
+                this.cameraDistance = Math.max(minDist, Math.min(2000, this.cameraDistance));
+                this.applyCameraState();
+            });
+
+            // ===== 触控操作 =====
+            let touches = []; // 当前活跃的触摸点
+            let pinchStartDist = 0;
+            let pinchStartDistance = 0;
+
+            el.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                this.autoRotate = false;
+                const btn = document.getElementById('auto-rotate-btn');
+                if (btn) btn.textContent = '自动旋转';
+                const mBtn = document.getElementById('auto-rotate-btn-m');
+                if (mBtn) mBtn.textContent = '自转';
+
+                touches = Array.from(e.touches);
+
+                if (touches.length === 2) {
+                    // 双指：开始缩放
+                    const dx = touches[0].clientX - touches[1].clientX;
+                    const dy = touches[0].clientY - touches[1].clientY;
+                    pinchStartDist = Math.sqrt(dx * dx + dy * dy);
+                    pinchStartDistance = this.cameraDistance;
+                } else if (touches.length === 1) {
+                    // 单指：开始旋转
+                    lastX = touches[0].clientX;
+                    lastY = touches[0].clientY;
+                }
+            }, { passive: false });
+
+            el.addEventListener('touchmove', (e) => {
+                e.preventDefault();
+                touches = Array.from(e.touches);
+
+                if (touches.length === 2 && pinchStartDist > 0) {
+                    // 双指缩放
+                    const dx = touches[0].clientX - touches[1].clientX;
+                    const dy = touches[0].clientY - touches[1].clientY;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    const scale = pinchStartDist / dist;
+                    const minDist = this.mmdMode ? 3 : 50;
+                    this.cameraDistance = Math.max(minDist, Math.min(2000, pinchStartDistance * scale));
+                    this.applyCameraState();
+                } else if (touches.length === 1) {
+                    // 单指旋转
+                    const dx = touches[0].clientX - lastX;
+                    const dy = touches[0].clientY - lastY;
+                    this.cameraAngleX -= dx * 0.01;
+                    this.cameraAngleY += dy * 0.01;
+                    this.cameraAngleY = Math.max(-Math.PI / 2 + 0.1, Math.min(Math.PI / 2 - 0.1, this.cameraAngleY));
+                    lastX = touches[0].clientX;
+                    lastY = touches[0].clientY;
+                    this.applyCameraState();
+                }
+            }, { passive: false });
+
+            el.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                touches = Array.from(e.touches);
+                if (touches.length === 0) {
+                    pinchStartDist = 0;
+                } else if (touches.length === 1) {
+                    // 从双指变单指，重置旋转起点
+                    lastX = touches[0].clientX;
+                    lastY = touches[0].clientY;
+                    pinchStartDist = 0;
+                }
+            }, { passive: false });
         };
 
-        canvas.addEventListener('contextmenu', (e) => {
-            e.preventDefault();
-        });
-
-        canvas.addEventListener('mousedown', (e) => {
-            isDragging = true;
-            dragButton = e.button;
-            lastX = e.clientX;
-            lastY = e.clientY;
-            this.autoRotate = false;
-            document.getElementById('auto-rotate-btn').textContent = '自动旋转';
-        });
-
-        canvas.addEventListener('mousemove', (e) => {
-            if (!isDragging) return;
-            const dx = e.clientX - lastX;
-            const dy = e.clientY - lastY;
-
-            if (dragButton === 0) {
-                // 左键：旋转
-                this.cameraAngleX -= dx * 0.01;
-                this.cameraAngleY += dy * 0.01;
-                this.cameraAngleY = Math.max(-Math.PI / 2 + 0.1, Math.min(Math.PI / 2 - 0.1, this.cameraAngleY));
-            } else if (dragButton === 2 || dragButton === 1) {
-                // 右键/中键：平移（"抓取"模式 - 拖动方向 = 场景移动方向）
-                const panSpeed = this.cameraDistance * 0.002;
-                // 计算右方向和上方向在世界空间中的向量
-                const ax = this.cameraAngleX;
-                const ay = this.cameraAngleY;
-                // 右方向（屏幕右 -> 世界X/Z平面）
-                const rightX = Math.cos(ax);
-                const rightZ = -Math.sin(ax);
-                // 上方向（屏幕上 -> 世界Y + 部分X/Z）
-                const upX = -Math.sin(ax) * Math.sin(ay);
-                const upY = Math.cos(ay);
-                const upZ = -Math.cos(ax) * Math.sin(ay);
-
-                // 拖动右(dx>0) => 场景右移 => 摄像机左移 => 目标点 - right
-                // 拖动下(dy>0) => 场景下移 => 摄像机上移 => 目标点 + up
-                this.cameraTarget[0] -= rightX * dx * panSpeed;
-                this.cameraTarget[2] -= rightZ * dx * panSpeed;
-                this.cameraTarget[0] += upX * dy * panSpeed;
-                this.cameraTarget[1] += upY * dy * panSpeed;
-                this.cameraTarget[2] += upZ * dy * panSpeed;
-            }
-
-            lastX = e.clientX;
-            lastY = e.clientY;
-            updateCamera();
-        });
-
-        canvas.addEventListener('mouseup', () => { isDragging = false; });
-        canvas.addEventListener('mouseleave', () => { isDragging = false; });
-
-        canvas.addEventListener('wheel', (e) => {
-            e.preventDefault();
-            this.cameraDistance += e.deltaY * 0.5;
-            this.cameraDistance = Math.max(50, Math.min(2000, this.cameraDistance));
-            updateCamera();
-        });
-
-        // ===== 触控操作 =====
-        let touches = []; // 当前活跃的触摸点
-        let pinchStartDist = 0;
-        let pinchStartDistance = 0;
-
-        canvas.addEventListener('touchstart', (e) => {
-            e.preventDefault();
-            this.autoRotate = false;
-            const btn = document.getElementById('auto-rotate-btn');
-            if (btn) btn.textContent = '自动旋转';
-
-            touches = Array.from(e.touches);
-
-            if (touches.length === 2) {
-                // 双指：开始缩放
-                const dx = touches[0].clientX - touches[1].clientX;
-                const dy = touches[0].clientY - touches[1].clientY;
-                pinchStartDist = Math.sqrt(dx * dx + dy * dy);
-                pinchStartDistance = this.cameraDistance;
-            } else if (touches.length === 1) {
-                // 单指：开始旋转
-                lastX = touches[0].clientX;
-                lastY = touches[0].clientY;
-            }
-        }, { passive: false });
-
-        canvas.addEventListener('touchmove', (e) => {
-            e.preventDefault();
-            touches = Array.from(e.touches);
-
-            if (touches.length === 2 && pinchStartDist > 0) {
-                // 双指缩放
-                const dx = touches[0].clientX - touches[1].clientX;
-                const dy = touches[0].clientY - touches[1].clientY;
-                const dist = Math.sqrt(dx * dx + dy * dy);
-                const scale = pinchStartDist / dist;
-                this.cameraDistance = Math.max(50, Math.min(2000, pinchStartDistance * scale));
-                updateCamera();
-            } else if (touches.length === 1) {
-                // 单指旋转
-                const dx = touches[0].clientX - lastX;
-                const dy = touches[0].clientY - lastY;
-                this.cameraAngleX -= dx * 0.01;
-                this.cameraAngleY += dy * 0.01;
-                this.cameraAngleY = Math.max(-Math.PI / 2 + 0.1, Math.min(Math.PI / 2 - 0.1, this.cameraAngleY));
-                lastX = touches[0].clientX;
-                lastY = touches[0].clientY;
-                updateCamera();
-            }
-        }, { passive: false });
-
-        canvas.addEventListener('touchend', (e) => {
-            e.preventDefault();
-            touches = Array.from(e.touches);
-            if (touches.length === 0) {
-                pinchStartDist = 0;
-            } else if (touches.length === 1) {
-                // 从双指变单指，重置旋转起点
-                lastX = touches[0].clientX;
-                lastY = touches[0].clientY;
-                pinchStartDist = 0;
-            }
-        }, { passive: false });
+        bindCanvas(canvas);
+        bindCanvas(mmdCanvas);
 
         this.resetCamera = () => {
-            this.cameraDistance = 500;
-            this.cameraAngleX = 0;
-            this.cameraAngleY = 0.3;
-            this.cameraTarget = [0, 0, 0];
-            updateCamera();
+            if (this.mmdMode && this.mmdFit) {
+                // MMD 模式：恢复模型自动取景
+                this.cameraDistance = this.mmdFit.distance;
+                this.cameraAngleX = 0;
+                this.cameraAngleY = 0.3;
+                this.cameraTarget = [...this.mmdFit.target];
+            } else {
+                this.cameraDistance = 500;
+                this.cameraAngleX = 0;
+                this.cameraAngleY = 0.3;
+                this.cameraTarget = [0, 0, 0];
+            }
+            this.applyCameraState();
         };
 
-        updateCamera();
+        this.applyCameraState();
+    }
+
+    applyCameraState() {
+        const tx = this.cameraTarget ? this.cameraTarget[0] : 0;
+        const ty = this.cameraTarget ? this.cameraTarget[1] : 0;
+        const tz = this.cameraTarget ? this.cameraTarget[2] : 0;
+        const x = Math.sin(this.cameraAngleX) * Math.cos(this.cameraAngleY) * this.cameraDistance;
+        const y = Math.sin(this.cameraAngleY) * this.cameraDistance;
+        const z = Math.cos(this.cameraAngleX) * Math.cos(this.cameraAngleY) * this.cameraDistance;
+
+        if (this.mmdMode && this.mmdRenderer && this.mmdRenderer.ready) {
+            this.mmdRenderer.setCamera([tx + x, ty + y, tz + z], [tx, ty, tz]);
+        } else if (this.scene) {
+            this.scene.camera.setLocation([tx + x, ty + y, tz + z]);
+            this.scene.camera.face([tx, ty, tz], [0, 1, 0]);
+        }
+        this.updateOrientationIndicator();
     }
 
     // ===== 视角示意球 =====
@@ -1165,8 +1297,16 @@ class War3ModelViewerApp {
 
     // ===== 模型加载 =====
     async loadModel(modelPath, modelName) {
+        // MMD 模型（.pmd/.pmx）走独立渲染通道
+        if (this.isMmdFile(modelPath)) {
+            this.loadMmdModel(modelPath, modelName);
+            return;
+        }
+
         // 递增加载令牌，旧的加载请求完成后会被丢弃
         const myToken = ++this._loadToken;
+        // 加载 MDX 模型时切回 MDX 渲染通道
+        this.setMmdMode(false);
 
         this.showLoading(true);
         document.getElementById('model-info').textContent = '正在加载: ' + modelName;
@@ -1404,6 +1544,249 @@ class War3ModelViewerApp {
         }
 
         this.showLoading(false);
+    }
+
+    // ===== MMD 模型支持 =====
+    isMmdFile(source) {
+        if (typeof source !== 'string') return false;
+        return /\.(pmd|pmx)$/i.test(source);
+    }
+
+    isMmdMotionFile(name) {
+        return /\.vmd$/i.test(name);
+    }
+
+    rgbToHex(rgb) {
+        return '#' + rgb.map(v => Math.round(v * 255).toString(16).padStart(2, '0')).join('');
+    }
+
+    ensureMmdRenderer() {
+        if (this.mmdRenderer) return this.mmdRenderer;
+        const canvas = document.getElementById('mmd-canvas');
+        this.mmdRenderer = new MmdRenderer(canvas);
+        const rect = canvas.parentElement.getBoundingClientRect();
+        this.mmdRenderer.setSize(Math.max(1, Math.floor(rect.width)), Math.max(1, Math.floor(rect.height)));
+        const theme = document.body.getAttribute('data-theme');
+        const color = this.customBgColor || this.rgbToHex(this.themeColors[theme] || this.themeColors.dark);
+        this.mmdRenderer.setBackground(color);
+        console.log('[MMD] three.js 渲染通道已创建');
+        return this.mmdRenderer;
+    }
+
+    setMmdMode(on) {
+        const changed = this.mmdMode !== on;
+        this.mmdMode = on;
+        document.body.classList.toggle('mmd-mode', on);
+
+        const canvas = document.getElementById('canvas');
+        const mmdCanvas = document.getElementById('mmd-canvas');
+        if (canvas) canvas.style.display = on ? 'none' : '';
+        if (mmdCanvas) mmdCanvas.style.display = on ? 'block' : 'none';
+
+        if (this.mmdRenderer) {
+            if (on) {
+                this.mmdRenderer.show();
+            } else {
+                this.mmdRenderer.hide();
+            }
+        }
+
+        if (!on && changed) {
+            // 回到 MDX 模式时清空 MMD 动作列表，避免残留
+            this.mmdMotions = [];
+            this.mmdCurrentMotion = -1;
+        }
+    }
+
+    async loadMmdModel(modelPath, modelName) {
+        const myToken = ++this._loadToken;
+        this.showLoading(true);
+        document.getElementById('model-info').textContent = '正在加载: ' + modelName;
+        console.log('[MMD] 开始加载 MMD 模型:', modelPath, 'token=' + myToken);
+
+        // 移除当前 MDX 实例
+        if (this.currentInstance) {
+            this.scene.removeInstance(this.currentInstance);
+            this.currentInstance = null;
+            this.currentModel = null;
+        }
+
+        // 重置 MDX 侧状态
+        this.wireframeBuffers = null;
+        this.modelParser = null;
+        const wire = document.getElementById('wireframe-checkbox');
+        if (wire) wire.checked = false;
+
+        this.modelSource = modelPath;
+        this.mmdMotions = [];
+        this.mmdCurrentMotion = -1;
+
+        try {
+            const renderer = this.ensureMmdRenderer();
+            if (myToken !== this._loadToken) return;
+            renderer.show();
+            this.setMmdMode(true);
+
+            await renderer.loadModel(modelPath);
+            if (myToken !== this._loadToken) return;
+
+            // 应用自动取景（模型包围盒）
+            if (renderer.fit) {
+                this.mmdFit = renderer.fit;
+                this.cameraDistance = renderer.fit.distance;
+                this.cameraAngleX = 0;
+                this.cameraAngleY = 0.3;
+                this.cameraTarget = [...renderer.fit.target];
+            }
+            this.applyCameraState();
+
+            const displayName = this.getTranslation(modelName);
+            document.getElementById('model-info').textContent = displayName + ' | MMD 模型';
+
+            // 加载内置动作（失败不阻塞模型显示）
+            await this.loadBuiltinMmdMotions();
+            this.updateMmdAnimationList();
+            this.showLoading(false);
+        } catch (error) {
+            if (myToken !== this._loadToken) return;
+            console.error('加载 MMD 模型失败:', error);
+            const errMsg = error && error.message ? error.message : String(error);
+            document.getElementById('model-info').textContent = '加载失败: ' + errMsg;
+            this.showLoading(false);
+            this.showError('无法加载 MMD 模型', modelPath, errMsg);
+        }
+    }
+
+    /**
+     * 加载 ModelMMD/Motions/ 下的内置 VMD 动作并加入播放列表。
+     * 保留顺序；单个失败仅告警跳过。
+     */
+    async loadBuiltinMmdMotions() {
+        if (!this.mmdRenderer) return;
+        // 列表第一项：恢复到无 VMD 的默认人形姿势
+        this.mmdMotions.push({
+            name: '默认姿势（无动作）',
+            duration: 0,
+            defaultPose: true,
+        });
+        for (const item of MMD_BUILTIN_MOTIONS) {
+            try {
+                const url = MMD_MOTIONS_BASE + item.file;
+                const animation = await this.mmdRenderer.loadMotion(url + '?v=' + MMD_MOTIONS_VERSION);
+                this.mmdMotions.push({
+                    name: item.name,
+                    animation,
+                    duration: this.mmdRenderer.computeMotionDuration(animation),
+                    builtin: true,
+                });
+                console.log('[MMD] 内置动作已加载:', item.name, '(' + item.file + ')');
+            } catch (e) {
+                console.warn('[MMD] 内置动作加载失败:', item.file, e);
+            }
+        }
+    }
+
+    updateMmdAnimationList() {
+        const renderList = (el) => {
+            if (!el) return;
+            el.innerHTML = '';
+            if (this.mmdMotions.length === 0) {
+                el.innerHTML = '<div class="animation-empty">暂无动作<br>可上传自己的 VMD 动作</div>';
+                return;
+            }
+            this.mmdMotions.forEach((motion, index) => {
+                const item = document.createElement('div');
+                item.className = 'animation-item';
+                item.dataset.index = index;
+                if (index === this.mmdCurrentMotion) item.classList.add('active');
+                const name = document.createElement('span');
+                name.className = 'animation-item-name';
+                name.textContent = motion.name;
+                item.appendChild(name);
+                if (motion.builtin || motion.defaultPose) {
+                    const badge = document.createElement('span');
+                    badge.className = 'animation-item-badge';
+                    badge.textContent = motion.defaultPose ? '默认' : '内置';
+                    item.appendChild(badge);
+                }
+                const duration = document.createElement('span');
+                duration.className = 'animation-item-duration';
+                duration.textContent = motion.defaultPose ? '—' : (motion.duration || 0).toFixed(1) + 's';
+                item.appendChild(duration);
+                item.addEventListener('click', () => this.selectAnimation(index));
+                el.appendChild(item);
+            });
+        };
+        renderList(document.getElementById('animation-list'));
+        renderList(document.getElementById('animation-list-m'));
+
+        const motion = this.mmdMotions[this.mmdCurrentMotion];
+        const label = motion ? motion.name : '未选择';
+        const dName = document.getElementById('animation-current-name');
+        if (dName) dName.textContent = label;
+        const mName = document.getElementById('animation-current-name-m');
+        if (mName) mName.textContent = label;
+    }
+
+    playMmdMotion(index) {
+        if (!this.mmdRenderer || !this.mmdRenderer.model) return;
+        const motion = this.mmdMotions[index];
+        if (!motion) return;
+
+        // 默认姿势：清空动作，恢复无 VMD 的默认人形
+        if (motion.defaultPose) {
+            this.mmdRenderer.stop();
+            this.mmdCurrentMotion = index;
+            this.isPaused = false;
+            this.updateMmdAnimationList();
+            return;
+        }
+
+        this.mmdRenderer.playMotion(motion.animation, motion.name);
+        this.mmdCurrentMotion = index;
+        this.isPaused = false;
+
+        const speed = parseFloat(document.getElementById('speed-slider').value);
+        this.mmdRenderer.setSpeed(speed);
+        this.mmdRenderer.setLoop(document.getElementById('loop-checkbox').checked);
+
+        document.querySelectorAll('.animation-item').forEach(item => {
+            item.classList.toggle('active', parseInt(item.dataset.index) === index);
+        });
+        const dName = document.getElementById('animation-current-name');
+        if (dName) dName.textContent = motion.name;
+        const mName = document.getElementById('animation-current-name-m');
+        if (mName) mName.textContent = motion.name;
+    }
+
+    async loadMmdMotionFiles(files) {
+        const list = Array.from(files || []).filter(f => this.isMmdMotionFile(f.name));
+        if (list.length === 0) {
+            alert('请选择 .vmd 动作文件');
+            return;
+        }
+        if (!this.mmdMode || !this.mmdRenderer) {
+            alert('请先加载一个 MMD 模型');
+            return;
+        }
+        this.showLoading(true);
+        try {
+            for (const file of list) {
+                const animation = await this.mmdRenderer.loadMotion(file);
+                this.mmdMotions.push({
+                    name: file.name,
+                    animation,
+                    duration: this.mmdRenderer.computeMotionDuration(animation),
+                });
+            }
+            this.updateMmdAnimationList();
+            this.playMmdMotion(this.mmdMotions.length - 1);
+        } catch (e) {
+            console.error('加载 VMD 动作失败:', e);
+            alert('加载 VMD 动作失败: ' + (e && e.message ? e.message : e));
+        } finally {
+            this.showLoading(false);
+        }
     }
 
     findDefaultAnimation(model) {
@@ -1984,6 +2367,14 @@ class War3ModelViewerApp {
         const canvas = document.getElementById('canvas');
         this.resizeCanvas();
 
+        if (this.mmdRenderer) {
+            const rect = canvas.parentElement.getBoundingClientRect();
+            this.mmdRenderer.setSize(
+                Math.max(1, Math.floor(rect.width)),
+                Math.max(1, Math.floor(rect.height))
+            );
+        }
+
         if (this.scene) {
             this.scene.camera.perspective(
                 Math.PI / 4,
@@ -2002,6 +2393,17 @@ class War3ModelViewerApp {
         const now = performance.now();
         const dt = now - this.lastFrameTime;
         this.lastFrameTime = now;
+
+        // MMD 渲染通道
+        if (this.mmdMode && this.mmdRenderer && this.mmdRenderer.ready) {
+            if (this.autoRotate && !this.mmdRenderer.paused) {
+                this.cameraAngleX += this.rotationSpeed;
+                this.applyCameraState();
+            }
+            this.mmdRenderer.update(dt);
+            this.mmdRenderer.render();
+            return;
+        }
 
         if (this.autoRotate && !this.isPaused) {
             this.cameraAngleX += this.rotationSpeed;

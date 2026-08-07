@@ -1,12 +1,15 @@
 {
-  "generatedAt": "2026-07-28T04:09:20.990Z",
-  "totalModels": 2306,
+  "totalModels": 2315,
   "tree": [
     {
       "name": "自定义模型",
       "icon": "⭐",
       "path": "Models",
       "models": [
+        {
+          "name": "GreenDam",
+          "path": "Models/war3绿坝娘模型/GreenDam.mdx"
+        },
         {
           "name": "HeroMiku",
           "path": "Models/初音/HeroMiku.MDx"
@@ -10962,6 +10965,81 @@
             {
               "name": "StartLocation",
               "path": "War3Assets/Objects/StartLocation/StartLocation.mdx"
+            }
+          ],
+          "groups": {}
+        }
+      }
+    },
+    {
+      "name": "MMD 模型",
+      "icon": "🎤",
+      "path": "ModelMMD",
+      "models": [],
+      "subCategories": {
+        "Black01": {
+          "name": "Black01",
+          "path": "ModelMMD/Black01",
+          "models": [
+            {
+              "name": "カスタム少女",
+              "path": "ModelMMD/Black01/カスタム少女.pmd"
+            }
+          ],
+          "groups": {}
+        },
+        "Black02": {
+          "name": "Black02",
+          "path": "ModelMMD/Black02",
+          "models": [
+            {
+              "name": "カスタム少女",
+              "path": "ModelMMD/Black02/カスタム少女.pmd"
+            }
+          ],
+          "groups": {}
+        },
+        "GreenDam久天版绿坝娘MMD模型": {
+          "name": "GreenDam久天版绿坝娘MMD模型",
+          "path": "ModelMMD/GreenDam久天版绿坝娘MMD模型",
+          "models": [
+            {
+              "name": "greendam",
+              "path": "ModelMMD/GreenDam久天版绿坝娘MMD模型/greendam.pmd"
+            }
+          ],
+          "groups": {}
+        },
+        "LK2": {
+          "name": "LK2",
+          "path": "ModelMMD/LK2",
+          "models": [
+            {
+              "name": "カスタム少女",
+              "path": "ModelMMD/LK2/カスタム少女.pmd"
+            }
+          ],
+          "groups": {}
+        },
+        "格林达姆_ver1.0": {
+          "name": "格林达姆_ver1.0",
+          "path": "ModelMMD/格林达姆_ver1.0",
+          "models": [
+            {
+              "name": "兔子_手持",
+              "path": "ModelMMD/格林达姆_ver1.0/兔子_手持.pmx"
+            },
+            {
+              "name": "兔子_站立",
+              "path": "ModelMMD/格林达姆_ver1.0/兔子_站立.pmx"
+            },
+            {
+              "name": "格林达姆_ver1.0(151)",
+              "path": "ModelMMD/格林达姆_ver1.0/格林达姆_ver1.0(151).pmx"
+            },
+            {
+              "name": "格林达姆_ver1.0(160)",
+              "path": "ModelMMD/格林达姆_ver1.0/格林达姆_ver1.0(160).pmx"
             }
           ],
           "groups": {}

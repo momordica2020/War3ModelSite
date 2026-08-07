@@ -5,6 +5,7 @@ const path = require('path');
 
 const ROOT = path.resolve(__dirname, '..');
 const ASSETS_DIR = path.join(ROOT, 'War3Assets');
+const MMD_DIR = path.join(ROOT, 'ModelMMD');
 const OUTPUT = path.join(ROOT, 'src', 'models-index.json');
 
 // 要扫描的模型目录（按类别）
@@ -60,6 +61,69 @@ function findMdxFiles(dir, basePath = '') {
         }
     }
     return results;
+}
+
+// 扫描 ModelMMD/ 下的 .pmd/.pmx 文件（跳过"复件"副本与压缩包）
+function findMmdFiles(dir, basePath = '') {
+    const results = [];
+    if (!fs.existsSync(dir)) return results;
+
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    for (const entry of entries) {
+        if (entry.name.startsWith('复件')) continue;
+        const fullPath = path.join(dir, entry.name);
+        const relPath = basePath ? basePath + '/' + entry.name : entry.name;
+
+        if (entry.isDirectory()) {
+            results.push(...findMmdFiles(fullPath, relPath));
+        } else if (entry.isFile() && /\.(pmd|pmx)$/i.test(entry.name)) {
+            results.push({
+                name: entry.name.replace(/\.(pmd|pmx)$/i, ''),
+                path: 'ModelMMD/' + relPath.replace(/\\/g, '/'),
+            });
+        }
+    }
+    return results;
+}
+
+// 构建 MMD 模型分类（ModelMMD 下每个子目录作为一个子分类）
+function buildMmdCategory() {
+    const rootModels = [];
+    const subCategories = {};
+
+    if (fs.existsSync(MMD_DIR)) {
+        const entries = fs.readdirSync(MMD_DIR, { withFileTypes: true });
+        for (const entry of entries) {
+            if (entry.name.startsWith('复件')) continue;
+            if (entry.isDirectory()) {
+                const models = findMmdFiles(path.join(MMD_DIR, entry.name), entry.name);
+                if (models.length > 0) {
+                    subCategories[entry.name] = {
+                        name: entry.name,
+                        path: 'ModelMMD/' + entry.name,
+                        models: models,
+                        groups: {},
+                    };
+                }
+            } else if (entry.isFile() && /\.(pmd|pmx)$/i.test(entry.name)) {
+                rootModels.push({
+                    name: entry.name.replace(/\.(pmd|pmx)$/i, ''),
+                    path: 'ModelMMD/' + entry.name,
+                });
+            }
+        }
+    }
+
+    if (rootModels.length === 0 && Object.keys(subCategories).length === 0) {
+        return null;
+    }
+    return {
+        name: 'MMD 模型',
+        icon: '🎤',
+        path: 'ModelMMD',
+        models: rootModels,
+        subCategories: subCategories,
+    };
 }
 
 function buildCategoryTree(scanDirInfo) {
@@ -186,6 +250,13 @@ if (customModels.length > 0) {
         subCategories: {},
     });
     totalCount += customModels.length;
+}
+
+// MMD 模型分类（放在最后）
+const mmdCategory = buildMmdCategory();
+if (mmdCategory) {
+    tree.push(mmdCategory);
+    countModels(mmdCategory);
 }
 
 const output = {
